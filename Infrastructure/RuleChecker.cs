@@ -6,7 +6,7 @@ namespace DNS_proxy.Infrastructure;
 
 public class RuleChecker : IRuleChecker
 {
-    private static List<DnsRule> _rulesCache = new();
+    private static List<DnsRule> _rulesCache = [];
     private static DateTime _lastRulesLoaded = DateTime.MinValue;
 
     public DnsDecision Check(string clientIp, string domain)
@@ -21,7 +21,7 @@ public class RuleChecker : IRuleChecker
             if (rule.DomainPattern.StartsWith("*."))
             {
                 // Блокирует все поддомены: *.faceit.com → matches x.faceit.com, но не faceit.com
-                string bareDomain = rule.DomainPattern.Substring(2);
+                string bareDomain = rule.DomainPattern[2..];
                 if (!domain.EndsWith("." + bareDomain, StringComparison.OrdinalIgnoreCase))
                     continue;
             }
@@ -47,13 +47,13 @@ public class RuleChecker : IRuleChecker
         return DnsDecision.Allow;
     }
 
-    private void ReloadIfExpired()
+    private static void ReloadIfExpired()
     {
         if ((DateTime.UtcNow - _lastRulesLoaded).TotalSeconds < 60)
             return;
 
         using var db = new DnsRulesContext();
-        _rulesCache = db.DnsRules.ToList();
+        _rulesCache = [.. db.DnsRules];
         _lastRulesLoaded = DateTime.UtcNow;
         Console.WriteLine($"[RuleChecker] Загружено правил: {_rulesCache.Count}");
     }

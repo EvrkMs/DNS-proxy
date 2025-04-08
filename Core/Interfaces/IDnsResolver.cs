@@ -2,7 +2,7 @@
 
 namespace DNS_proxy.Core.Interfaces;
 
-public interface IDnsResolver
+public interface IResolverService
 {
     Task<IPAddress?> ResolveAsync(string domain);
 }

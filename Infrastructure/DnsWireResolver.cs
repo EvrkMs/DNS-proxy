@@ -1,9 +1,10 @@
 ﻿using System.Net;
 using ARSoft.Tools.Net.Dns;
+using DNS_proxy.Core.Interfaces;
 
 namespace DNS_proxy.Infrastructure;
 
-public class DnsWireResolver : Core.Interfaces.IDnsResolver
+public class DnsWireResolver : IResolverService
 {
     private readonly HttpClient _httpClient;
 
@@ -43,13 +44,14 @@ public class DnsWireResolver : Core.Interfaces.IDnsResolver
     {
         var rand = new Random();
         ushort transactionId = (ushort)rand.Next(ushort.MaxValue);
-        List<byte> message = new();
-
-        message.Add((byte)(transactionId >> 8));
-        message.Add((byte)(transactionId & 0xFF));
-        message.AddRange(new byte[] { 0x01, 0x00 }); // flags
-        message.AddRange(new byte[] { 0x00, 0x01 }); // QDCOUNT
-        message.AddRange(new byte[6]); // AN/NS/AR count
+        List<byte> message =
+        [
+            (byte)(transactionId >> 8),
+            (byte)(transactionId & 0xFF),
+            .. new byte[] { 0x01, 0x00 }, // flags
+            .. new byte[] { 0x00, 0x01 }, // QDCOUNT
+            .. new byte[6], // AN/NS/AR count
+        ];
 
         foreach (var label in domain.Split('.'))
         {

@@ -22,9 +22,9 @@ namespace DNS_proxy.UI
 
         public void AppendLog(string msg)
         {
-            if (InvokeRequired)
+            if (richTextBoxLogs.InvokeRequired)
             {
-                Invoke(new Action<string>(AppendLog), msg);
+                richTextBoxLogs.Invoke(new Action<string>(AppendLog), msg);
                 return;
             }
 
@@ -76,7 +76,7 @@ namespace DNS_proxy.UI
             }
 
             db.SaveChanges();
-            CustomDnsServer.ReloadRulesPublic();
+            _server.ReloadRulesPublic();
             MessageBox.Show("Правила сохранены!");
         }
         private void BtnAddRule_Click(object sender, EventArgs e)

@@ -8,37 +8,39 @@ public class AppContext : ApplicationContext
 {
     private readonly NotifyIcon _trayIcon;
     private readonly MainForm _mainForm;
-    private readonly CustomDnsServer _server = DnsServerInstance.Server;
+    private readonly CustomDnsServer _server;
 
-    public AppContext()
+    public AppContext(CustomDnsServer server)
     {
+        _server = server;
         _server.OnLog += AppendLogToUi;
-        // Запускаем миграции и сервер
+
         Console.WriteLine("DNS-сервер запускается...");
         MigrateAndSeed();
-
-        // Создаем форму, но не показываем
         _mainForm = new MainForm(_server);
         _mainForm.FormClosed += (_, _) => ExitThread();
 
-        // Создаем иконку в трее
         _trayIcon = new NotifyIcon
         {
-            Icon = SystemIcons.Application, // можно заменить на свою
+            Icon = SystemIcons.Application,
             Visible = true,
             Text = "DNS Proxy",
             ContextMenuStrip = new ContextMenuStrip()
             {
                 Items =
-            {
-                new ToolStripMenuItem("Открыть интерфейс", null, (_,_) => _mainForm.Show()),
-                new ToolStripMenuItem("Выход", null, (_,_) => Exit())
-            }
+                {
+                    new ToolStripMenuItem("Открыть интерфейс", null, (_,_) => _mainForm.Show()),
+                    new ToolStripMenuItem("Выход", null, (_,_) => Exit())
+                }
             }
         };
 
-        _trayIcon.DoubleClick += (_, _) => _mainForm.Show();
+        _trayIcon.DoubleClick += (_, _) =>
+        {
+            _mainForm.Show();
+        };
     }
+
     private void AppendLogToUi(string message)
     {
         if (_mainForm?.InvokeRequired == true)
@@ -49,6 +51,7 @@ public class AppContext : ApplicationContext
 
         _mainForm?.AppendLog(message);
     }
+
     protected override void ExitThreadCore()
     {
         _trayIcon.Visible = false;

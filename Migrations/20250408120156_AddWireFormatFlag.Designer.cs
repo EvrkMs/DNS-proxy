@@ -2,6 +2,7 @@
 using DNS_proxy.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -9,9 +10,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace DNS_proxy.Migrations
 {
     [DbContext(typeof(DnsRulesContext))]
-    partial class DnsRulesContextModelSnapshot : ModelSnapshot
+    [Migration("20250408120156_AddWireFormatFlag")]
+    partial class AddWireFormatFlag
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "9.0.3");

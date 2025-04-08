@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using DNS_proxy.Core.Models;
 using DNS_proxy.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -14,6 +15,18 @@ public static class Utils
         using var db = new DnsRulesContext();
         Console.WriteLine("Применяем миграции...");
         db.Database.Migrate();
+
+        if (!db.DnsServers.Any())
+        {
+            Console.WriteLine("Добавляем стандартные DNS-сервера...");
+            db.DnsServers.AddRange(
+            [
+            new DnsServerEntry  { Address  = "https://dns.comss.one/dns-query", IsDoh = true, UseWireFormat = true, Priority = 1 },
+            new DnsServerEntry  { Address  = "https://cloudflare-dns.com/dns-query", IsDoh = true, Priority = 2 },
+            new DnsServerEntry  { Address  = "8.8.8.8", IsDoh = false, Priority = 3 }
+        ]);
+            db.SaveChanges();
+        }
     }
 
     public static void EnsureFirewallRules()

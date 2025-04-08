@@ -4,7 +4,7 @@ namespace DNS_proxy.UI.UtilsForm;
 
 public partial class EditRuleForm : Form
 {
-    private DnsRule _rule;
+    private readonly DnsRule _rule;
 
     public EditRuleForm(DnsRule rule)
     {
