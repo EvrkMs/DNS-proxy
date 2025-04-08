@@ -16,7 +16,7 @@ public partial class AddRuleForm : Form
         if (_editRule != null)
         {
             Text = "Редактирование правила";
-            txtIp.Text = _editRule.SourceIp;
+            txtIp.Address = _editRule.SourceIp;
             txtPattern.Text = _editRule.DomainPattern;
             cmbAction.SelectedItem = _editRule.Action;
             txtRewriteIp.Text = _editRule.RewriteIp;
@@ -45,7 +45,7 @@ public partial class AddRuleForm : Form
             var existing = db.DnsRules.Find(_editRule.Id);
             if (existing != null)
             {
-                existing.SourceIp = txtIp.Text;
+                existing.SourceIp = txtIp.Address;
                 existing.DomainPattern = txtPattern.Text;
                 existing.Action = cmbAction.SelectedItem.ToString();
                 existing.RewriteIp = txtRewriteIp.Text;
@@ -55,7 +55,7 @@ public partial class AddRuleForm : Form
         {
             db.DnsRules.Add(new DnsRule
             {
-                SourceIp = txtIp.Text,
+                SourceIp = txtIp.Address,
                 DomainPattern = txtPattern.Text,
                 Action = cmbAction.SelectedItem.ToString(),
                 RewriteIp = txtRewriteIp.Text

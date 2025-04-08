@@ -15,11 +15,20 @@ namespace DNS_proxy.UI
         {
             InitializeComponent();
             InitDataGrid();
+            InitServersGrid();
             _server = server;
             rulesGrid.CellContentClick += RulesGrid_CellClick;
         }
 
-
+        private void BtnAddServer_Click(object sender, EventArgs e)
+        {
+            var form = new EditDnsServerForm();
+            if (form.ShowDialog() == DialogResult.OK)
+            {
+                LoadDnsServers();
+                AppendLog("Добавлен DNS-сервер.");
+            }
+        }
         public void AppendLog(string msg)
         {
             if (richTextBoxLogs.InvokeRequired)
@@ -42,11 +51,32 @@ namespace DNS_proxy.UI
                 base.OnFormClosing(e);
             }
         }
+
+        private void BtnSaveServers_Click(object sender, EventArgs e)
+        {
+            using var db = new DnsRulesContext();
+            db.DnsServers.RemoveRange(db.DnsServers);
+            if (serversGrid.DataSource is BindingList<DnsServerEntry> list)
+                db.DnsServers.AddRange(list);
+
+            db.SaveChanges();
+            _server.ReloadRulesPublic();
+            MessageBox.Show("Список DNS-серверов обновлён!");
+        }
+
         private void MainForm_Load(object sender, EventArgs e)
         {
             LoadRules();
+            LoadDnsServers();
             Logger.OnLog = AppendLog;
         }
+        private void LoadDnsServers()
+        {
+            using var db = new DnsRulesContext();
+            var list = db.DnsServers.OrderBy(s => s.Priority).ToList();
+            serversGrid.DataSource = new BindingList<DnsServerEntry>(list);
+        }
+
         private void LoadRules()
         {
             using var db = new DnsRulesContext();

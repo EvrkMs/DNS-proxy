@@ -2,7 +2,6 @@
   "profiles": {
     "DNS-proxy": {
       "commandName": "Project",
-      "commandLineArgs": "-service",
       "hotReloadEnabled": false
     }
   }

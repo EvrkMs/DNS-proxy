@@ -71,6 +71,17 @@ public class CustomDnsServer : IDisposable
             Logger.Log($"[ReloadRules] Ошибка: {ex.Message}");
         }
     }
+    public void RestoreDnsServer()
+    {
+        try
+        {
+            _resolverService.RestoreDnsServer();
+        }
+        catch (Exception ex)
+        {
+            Logger.Log("Ошибка обновления списка серверов");
+        }
+    }
 
     private async Task OnQueryReceived(object sender, QueryReceivedEventArgs e)
     {

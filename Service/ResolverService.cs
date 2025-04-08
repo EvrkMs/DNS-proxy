@@ -12,7 +12,7 @@ namespace DNS_proxy.Service;
 public class ResolverService : IResolverService
 {
     private readonly HttpClient _httpClient = new();
-    private readonly List<DnsServerEntry> _servers;
+    private List<DnsServerEntry> _servers;
 
     private readonly Dictionary<string, Dictionary<string, CacheEntry>> _serverCache = [];
     private readonly TimeSpan _cacheDuration = TimeSpan.FromMinutes(5);
@@ -24,6 +24,18 @@ public class ResolverService : IResolverService
 
         foreach (var s in _servers)
             _serverCache[s.Address] = [];
+    }
+    public void RestoreDnsServer()
+    {
+        using var db = new DnsRulesContext();
+        var list = db.DnsServers.OrderBy(s => s.Priority).ToList();
+        if (list.Count > 0)
+        {
+            _servers.Clear();
+            _servers = list;
+            foreach (var s in _servers)
+                _serverCache[s.Address] = [];
+        }
     }
 
     public async Task<IPAddress?> ResolveAsync(string domain)

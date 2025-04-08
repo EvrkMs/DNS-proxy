@@ -18,7 +18,7 @@ public partial class EditRuleForm : Form
 
     private void btnSave_Click(object sender, EventArgs e)
     {
-        _rule.SourceIp = txtIp.Text;
+        _rule.SourceIp = txtIp.Address;
         _rule.DomainPattern = txtDomain.Text;
         _rule.Action = cmbAction.Text;
         _rule.RewriteIp = txtRewriteIp.Text;

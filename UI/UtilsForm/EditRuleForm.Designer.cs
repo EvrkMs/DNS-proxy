@@ -1,4 +1,6 @@
-﻿namespace DNS_proxy.UI.UtilsForm;
+﻿using DNS_proxy.UI.Components;
+
+namespace DNS_proxy.UI.UtilsForm;
 
 public partial class EditRuleForm
 {
@@ -16,7 +18,7 @@ public partial class EditRuleForm
 
     private void InitializeComponent()
     {
-        this.txtIp = new TextBox();
+        this.txtIp = new IpAddressControl();
         this.txtDomain = new TextBox();
         this.cmbAction = new ComboBox();
         this.txtRewriteIp = new TextBox();
@@ -129,7 +131,7 @@ public partial class EditRuleForm
 
     #endregion
 
-    private TextBox txtIp;
+    private IpAddressControl txtIp;
     private TextBox txtDomain;
     private ComboBox cmbAction;
     private TextBox txtRewriteIp;

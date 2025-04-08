@@ -1,4 +1,6 @@
-﻿namespace DNS_proxy.UI.UtilsForm
+﻿using DNS_proxy.UI.Components;
+
+namespace DNS_proxy.UI.UtilsForm
 {
     partial class AddRuleForm
     {
@@ -36,7 +38,7 @@
             Label lbl3 = new() { Text = "Действие:", Location = new(10, 70) };
             Label lbl4 = new() { Text = "Подменный IP:", Location = new(10, 100) };
 
-            txtIp = new() { Location = new(120, 10), Width = 200 };
+            txtIp = new IpAddressControl() { Location = new(120, 10), Width = 200 };
             txtPattern = new() { Location = new(120, 40), Width = 200 };
             cmbAction = new() { Location = new(120, 70), Width = 200 };
             txtRewriteIp = new() { Location = new(120, 100), Width = 200 };
@@ -57,7 +59,8 @@
 
         #endregion
 
-        private TextBox txtIp, txtPattern, txtRewriteIp;
+        private TextBox txtPattern, txtRewriteIp;
+        private IpAddressControl txtIp;
         private ComboBox cmbAction;
         private Button btnAdd;
     }
