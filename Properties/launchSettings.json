@@ -1,8 +1,12 @@
 {
   "profiles": {
-    "DNS-proxy": {
+    "DnsProxy": {
       "commandName": "Project",
-      "hotReloadEnabled": false
+      "launchBrowser": true,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "applicationUrl": "https://localhost:2856;http://localhost:2857"
     }
   }
 }

@@ -1,0 +1,20 @@
+@page
+@using DnsProxy.Pages.Logs
+@model IndexModel
+@{
+        Layout = "_Layout";   // берётся Pages/Shared/_Layout.cshtml
+    ViewData["Title"] = "Логи";
+}
+<h2>Последний лог-файл</h2>
+
+<div class="mb-2">
+  <button class="btn btn-outline-light btn-sm"
+          onclick="navigator.clipboard.writeText(document.getElementById('logbox').innerText)">
+      <i class="bi bi-clipboard"></i> Copy
+  </button>
+</div>
+
+<pre id="logbox" class="bg-dark text-white p-3 border rounded"
+     style="max-height:60vh; overflow:auto; font-size:0.8rem;">
+@Html.Raw(Model.LogText.Replace("<","&lt;"))
+</pre>

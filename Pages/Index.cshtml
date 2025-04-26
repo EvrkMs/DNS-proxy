@@ -1,0 +1,25 @@
+@page
+@using DnsProxy.Pages
+@model DnsProxy.Pages.IndexModel
+<h2>Последние запросы</h2>
+@{
+    Layout = "_Layout";   // берётся Pages/Shared/_Layout.cshtml
+}
+
+<table class="table table-hover table-dark table-sm">
+    <thead><tr>
+        <th>Время</th><th>Клиент</th><th>Домен</th><th>Upstream</th><th>Действие</th>
+    </tr></thead>
+    <tbody>
+    @foreach (var s in Model.Items)
+    {
+        <tr>
+            <td>@s.Timestamp.ToLocalTime()</td>
+            <td>@s.ClientIp</td>
+            <td>@s.Domain</td>
+            <td>@s.Upstream</td>
+            <td>@s.Action</td>
+        </tr>
+    }
+    </tbody>
+</table>

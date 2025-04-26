@@ -1,0 +1,34 @@
+﻿@page
+@model DnsProxy.Pages.Health.IndexModel
+@{
+    Layout = "_Layout";
+}
+<h2>Апстрим-проверка (chatgpt.com)</h2>
+
+<table class="table table-dark table-striped">
+    <thead>
+        <tr>
+            <th>Сервер</th>
+            <th>Протокол</th>
+            <th>Код ответа</th>
+            <th>IP</th>
+            <th>TTL</th>
+            <th>мс</th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var r in Model.Items)
+        {
+            <tr class="@(r.Ip == "-" ? "table-danger" : "")">
+                <td>@r.Server</td>
+                <td>@r.Proto</td>
+                <td>@r.Rcode</td>
+                <td>@r.Ip</td>
+                <td>@(r.Ttl == 0 ? "–" : r.Ttl)</td>
+                <td>@r.Ms</td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+<a class="btn btn-outline-light" href="">↻ проверить ещё раз</a>

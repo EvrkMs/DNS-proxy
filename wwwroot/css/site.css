@@ -1,0 +1,5 @@
+.table-dark td, .table-dark th { vertical-align: middle; }
+
+.btn-danger .bi,
+.btn-primary .bi,
+.btn-success .bi { pointer-events: none; }  /* чтобы клик шёл по кнопке */

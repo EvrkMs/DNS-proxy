@@ -1,49 +1,58 @@
-﻿using DNS_proxy.Service;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
+using DnsProxy.Data;
+using DnsProxy.Services;
+using DnsProxy.Services.Interfaces;
+using Microsoft.EntityFrameworkCore;
+using Serilog;
 
-namespace DNS_proxy;
+var builder = WebApplication.CreateBuilder(args);
 
-public static class Program
+// хранить в каталоге /app/data/proxy.db
+var dbPath = Path.Combine(AppContext.BaseDirectory, "data", "proxy.db");
+builder.Services.AddDbContext<AppDbContext>(o => o.UseSqlite($"Data Source={dbPath}"));
+
+builder.Services.AddMemoryCache();
+
+builder.Host.UseSerilog((ctx, lc) => lc
+    .WriteTo.Console()
+    .WriteTo.File("logs/log-.txt",
+                  rollingInterval: RollingInterval.Day,
+                  retainedFileCountLimit: 7));
+
+builder.Services.AddHttpClient();
+
+builder.Services.AddScoped<IDnsConfigService, DnsConfigService>();
+builder.Services.AddScoped<IRuleService, RuleService>();
+builder.Services.AddScoped<IStatisticsService, StatisticsService>();
+builder.Services.AddScoped<ICacheService, MemoryCacheService>();
+builder.Services.AddScoped<IResolverService, ResolverService>();
+
+builder.Services.AddSingleton<DnsProxyServer>();
+builder.Services.AddHostedService<DnsBackground>();
+
+builder.Services.AddRazorPages();
+
+var app = builder.Build();
+
+app.UseStaticFiles();         // 1
+app.UseRouting();             // 2
+app.UseAuthorization();       // 2 (останется no-op, пока auth не добавишь)
+
+app.MapRazorPages();
+app.MapPost("/admin/flush", (ICacheService c) =>
 {
-    public static void Main(string[] args)
+    if (c is MemoryCacheService m) m.Clear();
+    Log.Logger.Information("Cache flushed");
+    return Results.NoContent();
+});
+
+Seeder.Seed(app.Services);
+app.Run();
+
+class DnsBackground(DnsProxyServer srv) : BackgroundService
+{
+    protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (args.Contains("-service"))
-        {
-            Utils.Utils.MigrateAndSeed();
-
-            var configService = new DnsConfigService();
-            var ruleService = new RuleService();
-            var resolverService = new ResolverService();
-
-            var dnsServer = new CustomDnsServer(configService, ruleService, resolverService);
-            var service = new DnsProxyBackgroundService(dnsServer);
-
-            Host.CreateDefaultBuilder(args)
-                .UseWindowsService()
-                .ConfigureServices(services =>
-                {
-                    services.AddHostedService(_ => service);
-                })
-                .Build()
-                .Run();
-        }
-        else
-        {
-            Application.EnableVisualStyles();
-            Application.SetCompatibleTextRenderingDefault(false);
-
-            Utils.Utils.MigrateAndSeed();
-
-            // Всё создаём руками
-            var configService = new DnsConfigService();
-            var ruleService = new RuleService();
-            var resolverService = new ResolverService();
-
-            var dnsServer = new CustomDnsServer(configService, ruleService, resolverService);
-
-            // UI запускаем с явно переданными зависимостями
-            Application.Run(new AppContext(dnsServer));
-        }
+        srv.Start();
+        return Task.CompletedTask;
     }
 }

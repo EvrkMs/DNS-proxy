@@ -1,65 +1,25 @@
-﻿using System.Net;
+using System.Net;
 
-namespace DNS_proxy.Utils;
+namespace DnsProxy.Utils;
 
 public static class IpMatchHelper
 {
-    public static bool IsIpMatch(string ip, string rule)
+    public static bool IsMatch(string clientIp, string pattern)
     {
-        if (rule.Contains('/')) return MatchCidr(ip, rule);
-        if (rule.Contains('-')) return MatchRange(ip, rule);
-        return ip == rule;
-    }
-
-    private static bool MatchRange(string ipStr, string range)
-    {
-        var parts = range.Split('-');
-        if (parts.Length != 2) return false;
-
-        if (!IPAddress.TryParse(ipStr, out var ip)) return false;
-        if (!IPAddress.TryParse(parts[0], out var start)) return false;
-        if (!IPAddress.TryParse(parts[1], out var end)) return false;
-
-        var ipBytes = ip.GetAddressBytes();
-        var startBytes = start.GetAddressBytes();
-        var endBytes = end.GetAddressBytes();
-
-        if (ipBytes.Length != startBytes.Length || ipBytes.Length != endBytes.Length)
-            return false;
-
-        for (int i = 0; i < ipBytes.Length; i++)
+        if (string.IsNullOrWhiteSpace(pattern) || pattern == "*")
+            return true;
+        if (pattern.Contains('/'))
         {
-            if (ipBytes[i] < startBytes[i]) return false;
-            if (ipBytes[i] > endBytes[i]) return false;
+            var parts = pattern.Split('/');
+            if (!IPAddress.TryParse(parts[0], out var network)) return false;
+            if (!int.TryParse(parts[1], out var prefix)) return false;
+            if (!IPAddress.TryParse(clientIp, out var ip)) return false;
+            uint net = ToUint(network);
+            uint addr = ToUint(ip);
+            uint mask = prefix == 0 ? 0 : 0xFFFFFFFFu << (32 - prefix);
+            return (net & mask) == (addr & mask);
         }
-
-        return true;
+        return clientIp.Equals(pattern, StringComparison.OrdinalIgnoreCase);
     }
-
-    private static bool MatchCidr(string ipStr, string cidr)
-    {
-        var parts = cidr.Split('/');
-        if (parts.Length != 2 || !IPAddress.TryParse(ipStr, out var ip) || !IPAddress.TryParse(parts[0], out var net))
-            return false;
-
-        int prefixLength = int.Parse(parts[1]);
-
-        var ipBytes = ip.GetAddressBytes();
-        var netBytes = net.GetAddressBytes();
-
-        if (ipBytes.Length != netBytes.Length)
-            return false;
-
-        int fullBytes = prefixLength / 8;
-        int remainingBits = prefixLength % 8;
-
-        for (int i = 0; i < fullBytes; i++)
-            if (ipBytes[i] != netBytes[i])
-                return false;
-
-        if (remainingBits == 0) return true;
-
-        int mask = 0xFF << (8 - remainingBits);
-        return (ipBytes[fullBytes] & mask) == (netBytes[fullBytes] & mask);
-    }
+    private static uint ToUint(IPAddress ip) => BitConverter.ToUInt32(ip.GetAddressBytes().Reverse().ToArray(), 0);
 }
