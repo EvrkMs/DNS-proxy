@@ -18,7 +18,7 @@
   <None Remove="Dockerfile" />
 </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Ae.Dns.Client" Version="3.*" />
+    <PackageReference Include="Ae.Dns.Protocol" Version="3.0.0" />
     <PackageReference Include="ARSoft.Tools.Net.Core" Version="2.3.0" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.0" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.0" />

@@ -61,6 +61,9 @@ namespace DnsProxy.Migrations
                     b.Property<int>("Protocol")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("StaticAddress")
+                        .HasColumnType("TEXT");
+
                     b.HasKey("Id");
 
                     b.ToTable("Servers");

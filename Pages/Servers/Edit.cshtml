@@ -16,7 +16,10 @@
     <label asp-for="Item.Priority" class="form-label"></label>
     <input asp-for="Item.Priority" class="form-control"/>
   </div>
-
+    <div class="col-md-8">
+        <label asp-for="Item.StaticAddress" class="form-label"></label>
+        <input asp-for="Item.StaticAddress" class="form-control" />
+    </div>
     <select asp-for="Item.Protocol" class="form-select">
         @foreach (var p in Enum.GetValues<DnsProtocol>())
         {

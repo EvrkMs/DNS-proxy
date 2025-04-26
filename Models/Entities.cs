@@ -1,3 +1,5 @@
+using System.Net;
+
 namespace DnsProxy.Models;
 
 public enum RuleAction { Allow, Block, Rewrite }
@@ -24,6 +26,7 @@ public class DnsServerEntry
     public string Address { get; set; } = "";
     public DnsProtocol Protocol { get; set; }
     public int Priority { get; set; }
+    public IPAddress? StaticAddress { get; set; }
 }
 
 public class VisitStatistic

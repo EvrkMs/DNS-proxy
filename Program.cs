@@ -1,15 +1,24 @@
 using DnsProxy.Data;
 using DnsProxy.Services;
-using DnsProxy.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
 using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // хранить в каталоге /app/data/proxy.db
-var dbPath = Path.Combine(AppContext.BaseDirectory, "data", "proxy.db");
-builder.Services.AddDbContext<AppDbContext>(o => o.UseSqlite($"Data Source={dbPath}"));
+// 1. Определяем папку ProgramData (CommonApplicationData)
+var commonData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+// 2. В нашей подпапке (например, "DnsProxy") создаём каталог, если его нет
+var appDataDir = Path.Combine(commonData, "DnsProxy");
+if (!Directory.Exists(appDataDir))
+{
+    Directory.CreateDirectory(appDataDir);
+}
+var dbPath = Path.Combine(appDataDir, "proxy.db");
 
+// Регистрируем контекст с этим путём
+builder.Services.AddDbContext<AppDbContext>(opts =>
+    opts.UseSqlite($"Data Source={dbPath}"));
 builder.Services.AddMemoryCache();
 
 builder.Host.UseSerilog((ctx, lc) => lc

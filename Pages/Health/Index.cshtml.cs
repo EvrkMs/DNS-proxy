@@ -1,8 +1,8 @@
 ﻿// Pages/Health/Index.cshtml.cs
 using System.Diagnostics;
+using Ae.Dns.Protocol;
 using DnsProxy.Models;
 using DnsProxy.Services;
-using DnsProxy.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 
 namespace DnsProxy.Pages.Health;

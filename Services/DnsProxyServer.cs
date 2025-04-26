@@ -1,7 +1,6 @@
 ﻿using System.Net;
 using ARSoft.Tools.Net.Dns;
 using DnsProxy.Models;
-using DnsProxy.Services.Interfaces;
 using DnsProxy.Utils;
 
 namespace DnsProxy.Services;
