@@ -21,13 +21,17 @@ builder.Services.AddDbContext<AppDbContext>(opts =>
     opts.UseSqlite($"Data Source={dbPath}"));
 builder.Services.AddMemoryCache();
 
-/*
+// Program.cs  ─ после builder.Host…
 builder.Host.UseSerilog((ctx, lc) => lc
-    .WriteTo.Console()
-    .WriteTo.File("logs/log-.txt",
+    .MinimumLevel.Information()               // всё, что ниже, игнорируем
+    .MinimumLevel.Override("Microsoft", Serilog.Events.LogEventLevel.Warning)
+    .MinimumLevel.Override("System", Serilog.Events.LogEventLevel.Warning)
+    .WriteTo.File("logs/errors-.txt",
                   rollingInterval: RollingInterval.Day,
-                  retainedFileCountLimit: 7));
-*/
+                  restrictedToMinimumLevel: Serilog.Events.LogEventLevel.Warning,
+                  retainedFileCountLimit: 7)
+);
+
 builder.Services.AddHttpClient();
 
 builder.Services.AddScoped<IDnsConfigService, DnsConfigService>();

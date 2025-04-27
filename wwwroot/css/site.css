@@ -1,5 +1,15 @@
-.table-dark td, .table-dark th { vertical-align: middle; }
+.table-dark td, .table-dark th {
+    vertical-align: middle;
+}
 
+.table-dark tbody tr:hover {
+    background: #222 !important;
+    cursor: pointer;
+}
+
+/* кнопка по-человечески кликается целиком */
 .btn-danger .bi,
 .btn-primary .bi,
-.btn-success .bi { pointer-events: none; }  /* чтобы клик шёл по кнопке */
+.btn-success .bi {
+    pointer-events: none;
+}
