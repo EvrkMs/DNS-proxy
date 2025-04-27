@@ -21,12 +21,13 @@ builder.Services.AddDbContext<AppDbContext>(opts =>
     opts.UseSqlite($"Data Source={dbPath}"));
 builder.Services.AddMemoryCache();
 
+/*
 builder.Host.UseSerilog((ctx, lc) => lc
     .WriteTo.Console()
     .WriteTo.File("logs/log-.txt",
                   rollingInterval: RollingInterval.Day,
                   retainedFileCountLimit: 7));
-
+*/
 builder.Services.AddHttpClient();
 
 builder.Services.AddScoped<IDnsConfigService, DnsConfigService>();

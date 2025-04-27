@@ -58,7 +58,7 @@ public class DnsProxyServer : IDisposable
 
         if (rcode == "BLOCK")
         {
-            resp.ReturnCode = ReturnCode.Refused;
+            resp.ReturnCode = ReturnCode.NxDomain;
         }
         else if (ip == null)
         {

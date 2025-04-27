@@ -1,14 +1,10 @@
 ﻿// File: Services/Interfaces/IResolverService.cs
 using System.Net;
 using System.Net.Http.Headers;
-using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
-using ARSoft.Tools.Net.Dns;
-using DnsClient;
 using DnsProxy.Models;
 using DnsProxy.Services;
-using Microsoft.Extensions.Caching.Memory;
 
 namespace DnsProxy.Services
 {
@@ -28,199 +24,218 @@ namespace DnsProxy.Services
     }
 }
 
+
 namespace DnsProxy.Services
 {
-    public sealed class ResolverService : IResolverService
+    /// <inheritdoc/>
+    public class ResolverService(IHttpClientFactory httpFactory,
+                           ILogger<ResolverService> log) : IResolverService
     {
-        private readonly IHttpClientFactory _http;
-        private readonly ILogger<ResolverService> _log;
-        private readonly IMemoryCache _cache;
+        private readonly IHttpClientFactory _httpFactory = httpFactory ?? throw new ArgumentNullException(nameof(httpFactory));
+        private readonly ILogger<ResolverService> _log = log ?? throw new ArgumentNullException(nameof(log));
 
-        public ResolverService(IHttpClientFactory http,
-                               ILogger<ResolverService> log,
-                               IMemoryCache cache)
+        public async Task<(IPAddress? ip, int ttl, string upstream, string diag)> ResolveAsync(string domain, List<DnsServerEntry> pool)
         {
-            _http = http;
-            _log = log;
-            _cache = cache;
-        }
-
-        /* ───────── PUBLIC ───────── */
-
-        public async Task<(IPAddress? ip, int ttl, string upstream, string diag)>
-            ResolveAsync(string domain, List<DnsServerEntry> pool)
-        {
-            Exception? last = null;
+            Exception lastEx = null!;
 
             foreach (var s in pool.OrderBy(p => p.Priority))
             {
                 try
                 {
-                    var (ip, ttl) = s.Protocol switch
+                    (IPAddress? ip, int ttl) result = s.Protocol switch
                     {
                         DnsProtocol.Udp => await QueryUdpAsync(domain, s),
-                        DnsProtocol.DoH_Wire => await QueryWireAsync(domain, s),
-                        DnsProtocol.DoH_Json => await QueryJsonAsync(domain, s),
-                        _ => (null, 0)
+                        DnsProtocol.DoH_Wire => await QueryDoHWireManualAsync(domain, s),
+                        DnsProtocol.DoH_Json => await QueryDoHJsonAsync(domain, s),
+                        _ => throw new NotSupportedException($"Protocol {s.Protocol} not supported")
                     };
 
-                    if (ip != null)
-                        return (ip, ttl, s.Address, "NOERROR");
+                    if (result.ip != null)
+                        return (result.ip, result.ttl, s.Address, "NOERROR");
 
-                    _log.LogWarning("[{u}] NXDOMAIN for {d}", s.Address, domain);
+                    // если сервис вернул NX без исключения, логгируем и идём дальше
+                    _log.LogWarning("[{addr}] returned NXDOMAIN for {domain}", s.Address, domain);
                 }
                 catch (Exception ex)
                 {
-                    last = ex;
-                    _log.LogWarning(ex, "Upstream {u} failed", s.Address);
+                    lastEx = ex;
+                    _log.LogWarning(ex, "Upstream {addr} failed", s.Address);
                 }
             }
 
-            return (null, 0,
-                    pool.LastOrDefault()?.Address ?? "-",
-                    last?.GetBaseException().Message ?? "NXDOMAIN");
+            // 1) если хотя бы один upstream выбросил исключение — вернём его текст
+            if (lastEx != null)
+                return (null, 0, pool.Last().Address, lastEx.GetBaseException().Message);
+
+            // 2) иначе — просто NXDOMAIN после всех попыток
+            return (null, 0, pool.Last().Address, "NXDOMAIN");
         }
 
-        /* ───────── UDP ───────── */
 
-        private static async Task<(IPAddress?, int)> QueryUdpAsync(string dom, DnsServerEntry s)
+        private async Task<(IPAddress?, int)> QueryUdpAsync(string domain, DnsServerEntry s)
         {
-            var lc = new LookupClient(
-                        new LookupClientOptions(new NameServer(IPAddress.Parse(s.Address)))
-                        {
-                            Timeout = TimeSpan.FromSeconds(3),
-                            UseTcpFallback = true
-                        });
-
-            var r = await lc.QueryAsync(dom, QueryType.A);
-            var a = r.Answers.ARecords().FirstOrDefault();
-            return a is null ? (null, 0) : (a.Address, (int)a.TimeToLive);
-        }
-
-        /* ───────── DoH-wire (RFC 8484) ───────── */
-
-        private async Task<(IPAddress?, int)> QueryWireAsync(string dom, DnsServerEntry s)
-        {
-            var uri = new Uri(s.Address.TrimEnd('/'));           // https://dns.comss.one/dns-query
-            var host = uri.Host;
-
-            // 1. bootstrap-IP (кэшируется до 30 мин)
-            var ipHost = s.StaticAddress ?? await BootstrapIpAsync(host);
-
-            // 2. HTTP-клиент: соединяемся по IP, но URL сохраняем с host
-            var handler = new SocketsHttpHandler
-            {
-                ConnectCallback = async (ctx, ct) =>
+            // стандартный DNS по UDP через DnsClient
+            var client = new DnsClient.LookupClient(
+                new DnsClient.LookupClientOptions(
+                    new DnsClient.NameServer(IPAddress.Parse(s.Address)))
                 {
-                    var sock = new Socket(SocketType.Stream, ProtocolType.Tcp);
-                    await sock.ConnectAsync(ipHost, 443, ct);
-                    return new NetworkStream(sock, ownsSocket: true);
-                },
-                SslOptions = { TargetHost = host }  // SNI
-            };
+                    Timeout = TimeSpan.FromSeconds(2),
+                    UseTcpFallback = true
+                });
+            var res = await client.QueryAsync(domain, DnsClient.QueryType.A);
+            var rec = res.Answers.ARecords().FirstOrDefault();
+            return rec == null
+                ? (null, 0)
+                : (rec.Address, (int)rec.TimeToLive);
+        }
 
-            using var http = new HttpClient(handler);
-            http.DefaultRequestHeaders.Accept.ParseAdd("application/dns-message");
+        private async Task<(IPAddress?, int)> QueryDoHWireManualAsync(string domain, DnsServerEntry s)
+        {
+            // 1. нормализуем URL
+            var baseAddr = s.Address.TrimEnd('/');
+            if (!baseAddr.Contains('/'))
+                baseAddr += "/dns-query";
 
-            // 3. raw DNS-запрос
-            byte[] raw = BuildWireQuery(dom);
+            // 2. собираем raw DNS-запрос вручную
+            byte[] wire = BuildWireQuery(domain);
 
-            // Comss принимает ТОЛЬКО GET ?dns=  (POST выдаёт 400)
-            var b64 = Convert.ToBase64String(raw)
+            // 3. base64url
+            string b64 = Convert.ToBase64String(wire)
                              .TrimEnd('=')
                              .Replace('+', '-')
                              .Replace('/', '_');
+            var url = $"{baseAddr}?dns={b64}";
 
-            var getUri = new UriBuilder(uri) { Query = $"dns={b64}" }.Uri;
-            var resp = await http.GetAsync(getUri);
+            // 4. шлём GET HTTP/2 + Accept
+            var http = _httpFactory.CreateClient();
+            var req = new HttpRequestMessage(HttpMethod.Get, url)
+            {
+                Version = HttpVersion.Version20,
+                VersionPolicy = HttpVersionPolicy.RequestVersionOrHigher
+            };
+            req.Headers.Accept.Clear();
+            req.Headers.Accept.Add(
+                new MediaTypeWithQualityHeaderValue("application/dns-message"));
 
+            var resp = await http.SendAsync(req);
             if (!resp.IsSuccessStatusCode)
             {
-                _log.LogWarning("DoH-Wire {u} → {c}", getUri, resp.StatusCode);
+                var body = await resp.Content.ReadAsStringAsync();
+                _log.LogWarning("[DoH-Wire] {url} => {code} / {body}",
+                                url, resp.StatusCode, body);
                 return (null, 0);
             }
 
-            var bytes = await resp.Content.ReadAsByteArrayAsync();
-            var msg = DnsMessage.Parse(bytes);
-            var aRec = msg.AnswerRecords.OfType<ARecord>().FirstOrDefault();
-
-            return aRec == null ? (null, 0) : (aRec.Address, (int)aRec.TimeToLive);
+            var data = await resp.Content.ReadAsByteArrayAsync();
+            // 5. разбираем ответ вручную
+            return ParseAFromWire(data);
         }
 
-        /* ───────── DoH-JSON ───────── */
-
-        private async Task<(IPAddress?, int)> QueryJsonAsync(string dom, DnsServerEntry s)
+        private async Task<(IPAddress?, int)> QueryDoHJsonAsync(string domain, DnsServerEntry s)
         {
-            string baseUrl = s.Address.TrimEnd('/');
-            if (!baseUrl.Contains('/')) baseUrl += "/dns-query";
+            // 1. нормализуем URL
+            var baseAddr = s.Address.TrimEnd('/');
+            if (!baseAddr.Contains('/'))
+                baseAddr += "/resolve";
 
-            var ub = new UriBuilder(baseUrl);
+            // 2. собираем QueryString
+            var ub = new UriBuilder(baseAddr);
             var qs = System.Web.HttpUtility.ParseQueryString(ub.Query);
-            qs["name"] = dom;
+            qs["name"] = domain;
             qs["type"] = "A";
             ub.Query = qs.ToString();
 
-            using var http = _http.CreateClient();
-            http.DefaultRequestHeaders.Accept.ParseAdd("application/dns-json");
+            var http = _httpFactory.CreateClient();
+            http.DefaultRequestHeaders.Accept.Clear();
+            http.DefaultRequestHeaders.Accept
+                .Add(new MediaTypeWithQualityHeaderValue("application/dns-json"));
 
             var resp = await http.GetAsync(ub.Uri);
             if (!resp.IsSuccessStatusCode)
             {
-                _log.LogWarning("DoH-Json {u} → {c}", ub.Uri, resp.StatusCode);
+                var body = await resp.Content.ReadAsStringAsync();
+                _log.LogWarning("[DoH-Json] {url} => {code} / {body}",
+                                ub.Uri, resp.StatusCode, body);
                 return (null, 0);
             }
 
-            using var doc = await JsonDocument.ParseAsync(await resp.Content.ReadAsStreamAsync());
-            if (!doc.RootElement.TryGetProperty("Answer", out var arr))
+            using var doc = await JsonSerializer.DeserializeAsync<JsonDocument>(
+                                await resp.Content.ReadAsStreamAsync());
+            if (doc == null || !doc.RootElement.TryGetProperty("Answer", out var answers))
                 return (null, 0);
 
-            foreach (var el in arr.EnumerateArray())
-                if (el.GetProperty("type").GetInt32() == 1)
-                    return (IPAddress.Parse(el.GetProperty("data").GetString()!),
-                            el.GetProperty("TTL").GetInt32());
-
+            foreach (var el in answers.EnumerateArray())
+            {
+                if (el.GetProperty("type").GetInt32() != 1) continue;
+                var ip = IPAddress.Parse(el.GetProperty("data").GetString()!);
+                var ttl = el.GetProperty("TTL").GetInt32();
+                return (ip, ttl);
+            }
             return (null, 0);
         }
 
-        /* ───────── helpers ───────── */
-
         private static byte[] BuildWireQuery(string domain)
         {
-            ushort id = (ushort)Random.Shared.Next(ushort.MaxValue);     // ID
-            var buf = new List<byte>
-        {
-            (byte)(id >> 8), (byte)id,
-            0x01, 0x00,   // RD=1
-            0x00, 0x01,   // QDCOUNT
-            0x00, 0x00,   // ANCOUNT
-            0x00, 0x00,   // NSCOUNT
-            0x00, 0x00    // ARCOUNT
-        };
-
-            foreach (var label in domain.Split('.'))
+            // 12-byte DNS header
+            ushort id = (ushort)new Random().Next(0, 0x10000);
+            var header = new byte[]
             {
-                buf.Add((byte)label.Length);
-                buf.AddRange(Encoding.ASCII.GetBytes(label));
+                (byte)(id >> 8), (byte)id,
+                0x01, 0x00,   // RD=1
+                0x00, 0x01,   // QDCOUNT=1
+                0x00, 0x00,   // ANCOUNT
+                0x00, 0x00,   // NSCOUNT
+                0x00, 0x00    // ARCOUNT
+            };
+
+            // QNAME
+            var q = new List<byte>();
+            foreach (var lbl in domain.Split('.'))
+            {
+                var bs = Encoding.ASCII.GetBytes(lbl);
+                q.Add((byte)bs.Length);
+                q.AddRange(bs);
             }
-            buf.Add(0x00);              // end-label
-            buf.Add(0x00); buf.Add(0x01); // QTYPE = A
-            buf.Add(0x00); buf.Add(0x01); // QCLASS = IN
-            return [.. buf];
+            q.Add(0x00);            // term label
+            q.Add(0x00); q.Add(0x01);// QTYPE=A
+            q.Add(0x00); q.Add(0x01);// QCLASS=IN
+
+            return header.Concat(q).ToArray();
         }
 
-        private async Task<IPAddress> BootstrapIpAsync(string host)
+        private static (IPAddress?, int) ParseAFromWire(byte[] data)
         {
-            if (_cache.TryGetValue(host, out IPAddress ip))
-                return ip;
+            // простой разбор: пропускаем заголовок+вопрос, ищем первую запись типа A (0x0001)
+            int pos = 12;
+            // пропускаем QNAME
+            while (data[pos] != 0) pos += data[pos] + 1;
+            pos += 5; // null + QTYPE(2) + QCLASS(2)
 
-            var lookup = new LookupClient(NameServer.GooglePublicDns, NameServer.Cloudflare);
-            var res = await lookup.QueryAsync(host, QueryType.A);
-            var a = res.Answers.ARecords().FirstOrDefault()
-                     ?? throw new InvalidOperationException($"bootstrap {host}");
-
-            _cache.Set(host, a.Address,
-                       TimeSpan.FromSeconds(Math.Min(a.TimeToLive, 1800)));
-            return a.Address;
+            // ANCOUNT
+            int ancount = (data[6] << 8) | data[7];
+            for (int i = 0; i < ancount; i++)
+            {
+                // NAME (2 bytes, может быть pointer 0xC0..)
+                pos += 2;
+                // TYPE
+                ushort type = (ushort)((data[pos] << 8) | data[pos + 1]);
+                pos += 2;
+                // CLASS
+                pos += 2;
+                // TTL
+                int ttl = (data[pos] << 24) | (data[pos + 1] << 16) | (data[pos + 2] << 8) | data[pos + 3];
+                pos += 4;
+                // RDLENGTH
+                int len = (data[pos] << 8) | data[pos + 1];
+                pos += 2;
+                if (type == 1 && len == 4)
+                {
+                    var ip = new IPAddress(data.Skip(pos).Take(4).ToArray());
+                    return (ip, ttl);
+                }
+                pos += len;
+            }
+            return (null, 0);
         }
     }
 }
