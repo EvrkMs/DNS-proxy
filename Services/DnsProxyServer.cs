@@ -58,7 +58,13 @@ public class DnsProxyServer : IDisposable
 
         if (rcode == "BLOCK")
         {
-            resp.ReturnCode = ReturnCode.NxDomain;
+            // вариант A ― NXDOMAIN
+            //resp.ReturnCode = ReturnCode.NxDomain;
+
+            // вариант B ― отдать «чёрную дырку»
+            resp.AnswerRecords.Add(
+                new ARecord(q.Name, 60, IPAddress.Any));   // 0.0.0.0
+            
         }
         else if (ip == null)
         {
