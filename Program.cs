@@ -2,6 +2,7 @@ using DnsProxy.Data;
 using DnsProxy.Services;
 using Microsoft.EntityFrameworkCore;
 using Serilog;
+using Serilog.Events;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -23,14 +24,13 @@ builder.Services.AddMemoryCache();
 
 // Program.cs  ─ после builder.Host…
 builder.Host.UseSerilog((ctx, lc) => lc
-    .MinimumLevel.Information()               // всё, что ниже, игнорируем
-    .MinimumLevel.Override("Microsoft", Serilog.Events.LogEventLevel.Warning)
-    .MinimumLevel.Override("System", Serilog.Events.LogEventLevel.Warning)
+    .MinimumLevel.Debug()
+    .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
+    .WriteTo.Console(restrictedToMinimumLevel: LogEventLevel.Error)     // только Error+
     .WriteTo.File("logs/errors-.txt",
                   rollingInterval: RollingInterval.Day,
-                  restrictedToMinimumLevel: Serilog.Events.LogEventLevel.Warning,
-                  retainedFileCountLimit: 7)
-);
+                  restrictedToMinimumLevel: LogEventLevel.Error,
+                  retainedFileCountLimit: 7));
 
 builder.Services.AddHttpClient();
 
@@ -46,6 +46,8 @@ builder.Services.AddHostedService<DnsBackground>();
 builder.Services.AddRazorPages();
 
 var app = builder.Build();
+if (app.Environment.IsDevelopment())          // подробный стек в браузере
+    app.UseDeveloperExceptionPage();
 
 app.UseStaticFiles();         // 1
 app.UseRouting();             // 2

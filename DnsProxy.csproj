@@ -5,6 +5,7 @@
   <PublishAot>false</PublishAot>
   <ImplicitUsings>enable</ImplicitUsings>
   <PlatformTarget>AnyCPU</PlatformTarget>
+  <Nullable>disable</Nullable>
 </PropertyGroup>
 <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
   <DebugType>embedded</DebugType>
@@ -31,5 +32,8 @@
     <PackageReference Include="Serilog.Extensions.Hosting" Version="9.0.0" />
     <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
     <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="logs\" />
   </ItemGroup>
 </Project>

@@ -1,20 +1,25 @@
 @page
-@using DnsProxy.Pages.Logs
-@model IndexModel
+@model DnsProxy.Pages.Logs.IndexModel
 @{
-        Layout = "_Layout";   // берётся Pages/Shared/_Layout.cshtml
+    Layout = "_Layout";
     ViewData["Title"] = "Логи";
 }
-<h2>Последний лог-файл</h2>
+
+<h2 class="mb-3">Последний лог-файл</h2>
 
 <div class="mb-2">
-  <button class="btn btn-outline-light btn-sm"
-          onclick="navigator.clipboard.writeText(document.getElementById('logbox').innerText)">
-      <i class="bi bi-clipboard"></i> Copy
-  </button>
+    <button class="btn btn-outline-light btn-sm"
+            onclick="navigator.clipboard.writeText(document.getElementById('logbox').innerText)">
+        <i class="bi bi-clipboard"></i> Copy
+    </button>
 </div>
-
+<form asp-page-handler="Clear" method="post" class="d-inline ms-2"
+      onsubmit="return confirm('Удалить все файлы ошибок?');">
+    <button class="btn btn-danger btn-sm">
+        <i class="bi bi-trash"></i> Очистить
+    </button>
+</form>
 <pre id="logbox" class="bg-dark text-white p-3 border rounded"
-     style="max-height:60vh; overflow:auto; font-size:0.8rem;">
+     style="max-height:65vh;overflow:auto;font-size:0.8rem;">
 @Html.Raw(Model.LogText.Replace("<","&lt;"))
 </pre>

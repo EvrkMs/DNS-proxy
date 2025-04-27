@@ -9,7 +9,8 @@ public static class RuleHelper
     public static (RuleAction Action,
                    string? RewriteIp,
                    string? IncludeCsv,
-                   string? ExcludeCsv)
+                   string? ExcludeCsv,
+                   int? ForceServer)
         Apply(IEnumerable<DnsRule> rules, string clientIp, string domain)
     {
         foreach (var r in rules)
@@ -28,23 +29,34 @@ public static class RuleHelper
             return (r.Action,
                     r.RewriteIp,
                     r.IncludeServers,
-                    r.ExcludeServers);
+                    r.ExcludeServers,
+                    r.ForceServer?.Id);
         }
 
         // ничего не подошло — Allow по умолчанию
-        return (RuleAction.Allow, null, null, null);
+        return (RuleAction.Allow, null, null, null, null);
     }
 
     /* ---------------------------------------- */
 
-    private static bool DomainMatch(string host, string pattern)
+    // Utils/RuleHelper.cs
+    private static bool DomainMatch(string host, string csvPatterns)
     {
-        if (pattern.StartsWith("*.", StringComparison.Ordinal))
+        foreach (var p in csvPatterns.Split(',', StringSplitOptions.RemoveEmptyEntries))
         {
-            var bare = pattern[2..];
-            return host.Equals(bare, StringComparison.OrdinalIgnoreCase) ||
-                   host.EndsWith("." + bare, StringComparison.OrdinalIgnoreCase);
+            var pat = p.Trim();
+            if (pat.Length == 0) continue;
+
+            if (pat.StartsWith("*.", StringComparison.Ordinal))
+            {
+                var bare = pat[2..];
+                if (host.Equals(bare, StringComparison.OrdinalIgnoreCase) ||
+                    host.EndsWith('.' + bare, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            else if (host.Equals(pat, StringComparison.OrdinalIgnoreCase))
+                return true;
         }
-        return host.Equals(pattern, StringComparison.OrdinalIgnoreCase);
+        return false;
     }
 }

@@ -7,13 +7,21 @@ public enum RuleAction { Allow, Block, Rewrite }
 public class DnsRule
 {
     public int Id { get; set; }
-    public string SourceIp { get; set; } = "";
+    public string SourceIp { get; set; } = "*";
     public string DomainPattern { get; set; } = "";
+
     public RuleAction Action { get; set; }
+
     public string? RewriteIp { get; set; }
-    public string? IncludeServers { get; set; }    // csv серверов, через которые МОЖНО пустить
-    public string? ExcludeServers { get; set; }    // csv серверов, через которые НЕЛЬЗЯ
+
+    /* FK  ⇄  навигация */
+    public int? ForceServerId { get; set; }
+    public DnsServerEntry? ForceServer { get; set; }
+
+    public string? IncludeServers { get; set; }
+    public string? ExcludeServers { get; set; }
 }
+
 public enum DnsProtocol
 {
     Udp,
@@ -23,7 +31,7 @@ public enum DnsProtocol
 public class DnsServerEntry
 {
     public int Id { get; set; }
-    public string Address { get; set; } = "";
+    public string? Address { get; set; }
     public DnsProtocol Protocol { get; set; }
     public int Priority { get; set; }
     public IPAddress? StaticAddress { get; set; }
@@ -34,7 +42,9 @@ public class VisitStatistic
     public int Id { get; set; }
     public DateTime Timestamp { get; set; }
     public string ClientIp { get; set; } = "";
-    public string Domain { get; set; } = "";
-    public string Upstream { get; set; } = "";
+    public string? Domain { get; set; }
+    public string? Upstream { get; set; }
+
+    public string Rcode { get; set; } = "NOERROR";   // NEW («NOERROR», «NXDOMAIN», «TIMEOUT»…)
     public RuleAction Action { get; set; }
 }

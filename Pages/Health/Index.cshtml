@@ -3,18 +3,20 @@
 @{
     Layout = "_Layout";
 }
-<h2>Апстрим-проверка (chatgpt.com)</h2>
 
-<table class="table table-dark table-striped">
-    <thead>
-        <tr>
-            <th>Сервер</th>
-            <th>Протокол</th>
-            <th>Код ответа</th>
-            <th>IP</th>
-            <th>TTL</th>
-            <th>мс</th>
-        </tr>
+<h2 class="mb-3">Апстрим-проверка (chatgpt.com)</h2>
+
+<div class="table-responsive">
+<table class="table table-dark table-striped table-sm">
+    <thead class="table-primary text-center small">
+    <tr>
+        <th>Сервер</th>
+        <th>Протокол</th>
+        <th>RCODE</th>
+        <th>IP</th>
+        <th>TTL</th>
+        <th>мс</th>
+    </tr>
     </thead>
     <tbody>
         @foreach (var r in Model.Items)
@@ -30,5 +32,6 @@
         }
     </tbody>
 </table>
+</div>
 
 <a class="btn btn-outline-light" href="">↻ проверить ещё раз</a>

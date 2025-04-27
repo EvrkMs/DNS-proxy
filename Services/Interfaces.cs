@@ -8,7 +8,7 @@ public interface IDnsConfigService
 }
 public interface IRuleService
 {
-    Task<List<DnsRule>> GetAllAsync();
+    Task<List<DnsRule>> GetAllAsync(bool includeForce = false);
 }
 public interface IStatisticsService
 {

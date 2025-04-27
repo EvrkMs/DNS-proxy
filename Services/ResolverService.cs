@@ -4,7 +4,6 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using DnsProxy.Models;
-using DnsProxy.Services;
 
 namespace DnsProxy.Services
 {

@@ -1,35 +1,161 @@
 @page
-@model DnsProxy.Page.Rules.IndexModel
+@model DnsProxy.Pages.Rules.IndexModel
+@using DnsProxy.Models            <!-- enum RuleAction -->
 @addTagHelper *, Microsoft.AspNetCore.Mvc.TagHelpers
 @{
-    Layout = "_Layout";   // берётся Pages/Shared/_Layout.cshtml
+    Layout = "_Layout";
 }
-<h2>Правила</h2>
-<a asp-page="Edit" class="btn btn-success mb-3">
-  <i class="bi bi-plus-lg"></i> Добавить
-</a>
 
-<table class="table table-dark table-striped table-sm">
-<thead>
-<tr><th>Source IP</th><th>Домен</th><th>Action</th><th></th></tr>
-</thead>
-<tbody>
-@foreach (var r in Model.Items)
-{
-  <tr>
-    <td>@r.SourceIp</td>
-    <td>@r.DomainPattern</td>
-    <td>@r.Action</td>
-    <td class="text-end">
-      <a asp-page="Edit" asp-route-id="@r.Id" class="btn btn-sm btn-primary me-1">
-        <i class="bi bi-pencil"></i>
-      </a>
-      <form method="post" asp-page-handler="Delete" asp-route-id="@r.Id"
-            class="d-inline" onsubmit="return confirm('Удалить?');">
-        <button class="btn btn-sm btn-danger"><i class="bi bi-trash"></i></button>
-      </form>
-    </td>
-  </tr>
+<h2 class="mb-3">Правила</h2>
+
+<button id="addBtn" class="btn btn-success mb-3"
+        data-href="/Rules?handler=Partial">
+    <i class="bi bi-plus-lg"></i> Добавить
+</button>
+
+<!-- ░░░ фильтр / поиск ░░░ -->
+<div class="d-flex gap-2 mb-3">
+    <select id="ruleFilterField" class="form-select form-select-sm" style="max-width:160px">
+        <option value="any">Все поля</option>
+        <option value="ip">Source IP</option>
+        <option value="domain">Домен</option>
+        <option value="action">Action</option>
+    </select>
+
+    <input class="form-control form-control-sm flex-grow-1"
+           placeholder="поиск…" oninput="filterRules(this.value)" />
+
+    <button class="btn btn-outline-light btn-sm" onclick="location.reload()">↻</button>
+</div>
+
+<!-- ░░░ таблица ░░░ -->
+<div class="table-responsive">
+    <table class="table table-dark table-striped table-sm align-middle rules-table">
+        <thead class="table-primary text-center small">
+            <tr>
+                <th style="min-width:140px" data-sort="ip" role="button" onclick="sortRules(this)">
+                    Source IP <span class="sort-icon"></span>
+                </th>
+                <th data-sort="domain" role="button" onclick="sortRules(this)">
+                    Домен <span class="sort-icon"></span>
+                </th>
+                <th style="width:110px" data-sort="action" role="button" onclick="sortRules(this)">
+                    Action <span class="sort-icon"></span>
+                </th>
+                <th style="width:110px"></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var r in Model.Items)
+            {
+                string act = r.Action.ToString().ToLower(); // allow/block/rewrite
+                <tr data-ip="@r.SourceIp"
+                    data-domain="@r.DomainPattern.ToLower()"
+                    data-action="@act">
+
+                    <td>@r.SourceIp</td>
+                    <td>@r.DomainPattern</td>
+                    <td class="text-center text-capitalize">
+                        @switch (r.Action)
+                        {
+                            case RuleAction.Allow:
+                                   <span class="text-success">allow</span>
+                                ; break;
+                            case RuleAction.Block:
+                                   <span class="text-danger">block</span>
+                                ; break;
+                            case RuleAction.Rewrite:
+                                <span class="text-warning">rewrite</span>
+                                ; break;
+                        }
+                    </td>
+                    <td class="text-end">
+                        <a class="btn btn-sm btn-primary me-1 edit-btn"
+                           data-href="/Rules?handler=Partial&id=@r.Id">
+                            <i class="bi bi-pencil"></i>
+                        </a>
+                        <form method="post" asp-page-handler="Delete" asp-route-id="@r.Id"
+                              class="d-inline" onsubmit="return confirm('Удалить?');">
+                            <button class="btn btn-sm btn-danger"><i class="bi bi-trash"></i></button>
+                        </form>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+<!-- ░░░ пустой каркас Bootstrap-modal (контент подгружается ajax’ом) ░░░ -->
+<div class="modal fade" id="ruleModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-scrollable">
+        <div class="modal-content bg-dark text-white" id="ruleModalBody">
+            <!-- partial заменит всю .modal-content -->
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+
+    <script>
+        /* ========= helpers ========== */
+
+        /* открытие модалки (кнопка “добавить” и все .edit-btn) */
+        function openRule(url){
+            fetch(url)
+              .then(r=>r.ok? r.text():Promise.reject(r.status))
+              .then(html=>{
+                  document.getElementById('ruleModalBody').innerHTML = html;
+                  bootstrap.Modal.getOrCreateInstance('#ruleModal').show();
+              })
+              .catch(code=>alert('Ошибка '+code));
+        }
+
+        document.getElementById('addBtn').onclick = e=>{
+            e.preventDefault();
+            openRule(e.currentTarget.dataset.href);
+        };
+        document.querySelectorAll('.edit-btn').forEach(btn=>{
+            btn.onclick = e=>{
+                e.preventDefault();
+                openRule(btn.dataset.href);
+            };
+        });
+
+        /* ===== фильтр ===== */
+        function filterRules(q){
+          const mode=document.getElementById('ruleFilterField').value;
+          q=q.toLowerCase();
+          document.querySelectorAll('.rules-table tbody tr').forEach(tr=>{
+              const txt = mode==='ip'?tr.dataset.ip.toLowerCase():
+                          mode==='domain'?tr.dataset.domain:
+                          mode==='action'?tr.dataset.action:
+                          tr.innerText.toLowerCase();
+              tr.style.display = txt.includes(q)?'':'none';
+          });
+        }
+
+        /* ===== сортировка ===== */
+        let sortState={col:null,asc:true};
+        function sortRules(th){
+            const col=th.dataset.sort, tbody=th.closest('table').tBodies[0];
+            sortState.asc = sortState.col===col ? !sortState.asc : true;
+            sortState.col = col;
+            document.querySelectorAll('.sort-icon').forEach(i=>i.textContent='');
+            th.querySelector('.sort-icon').textContent = sortState.asc?'▲':'▼';
+
+            [...tbody.rows].sort((a,b)=>{
+                const va=a.dataset[col], vb=b.dataset[col];
+                if(col==='ip') return cmpIp(va,vb);
+                if(col==='action') return rank(va)-rank(vb);
+                return va.localeCompare(vb);
+            })[sortState.asc?'forEach':'reverse'](r=>tbody.appendChild(r));
+        }
+        const rank=a=>({block:0,allow:1,rewrite:2}[a]??99);
+        const cmpIp=(a,b)=>{
+            if(a==='*'||b==='*') return a==='*'?-1:1;
+            const pa=a.split('.').map(Number), pb=b.split('.').map(Number);
+            for(let i=0;i<4;i++) if(pa[i]!==pb[i]) return pa[i]-pb[i];
+            return 0;
+        }
+    </script>
 }
-</tbody>
-</table>

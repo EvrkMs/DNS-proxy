@@ -3,6 +3,7 @@ using System;
 using DnsProxy.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace DnsProxy.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20250427083823_NewStats")]
+    partial class NewStats
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "8.0.0");
@@ -32,9 +35,6 @@ namespace DnsProxy.Migrations
                     b.Property<string>("ExcludeServers")
                         .HasColumnType("TEXT");
 
-                    b.Property<int?>("ForceServerId")
-                        .HasColumnType("INTEGER");
-
                     b.Property<string>("IncludeServers")
                         .HasColumnType("TEXT");
 
@@ -45,8 +45,6 @@ namespace DnsProxy.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("ForceServerId");
 
                     b.ToTable("Rules");
                 });
@@ -101,15 +99,6 @@ namespace DnsProxy.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("Stats");
-                });
-
-            modelBuilder.Entity("DnsProxy.Models.DnsRule", b =>
-                {
-                    b.HasOne("DnsProxy.Models.DnsServerEntry", "ForceServer")
-                        .WithMany()
-                        .HasForeignKey("ForceServerId");
-
-                    b.Navigation("ForceServer");
                 });
 #pragma warning restore 612, 618
         }

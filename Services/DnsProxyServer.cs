@@ -1,16 +1,37 @@
-﻿using System.Net;
+﻿// -----------------------------------------------------------------------------
+//  DnsProxyServer.cs      DNS-проксирующий сервер c per-domain circuit-breaker
+// -----------------------------------------------------------------------------
+
+using System.Collections.Concurrent;
+using System.Net;
 using ARSoft.Tools.Net.Dns;
 using DnsProxy.Models;
 using DnsProxy.Utils;
 
 namespace DnsProxy.Services;
 
-public class DnsProxyServer : IDisposable
+public sealed class DnsProxyServer : IDisposable
 {
+    /*───────────────────────────────────────────────────────────────────────────*/
+    #region circuit-breaker storage
+    /*  Ключ  = (domain, upstream)
+        Val   = информация о неудачах / бане                                  */
+    private record FailInfo(int Count, DateTime? BannedUntil);
+    private const int FORCE_RETRY_MAX = 10;
+
+    private static readonly ConcurrentDictionary<(string domain, string up), FailInfo>
+        _fails = new();
+
+    private const int failThreshold = 5;                 // после 5 ошибок подряд
+    private static readonly TimeSpan banDuration = TimeSpan.FromMinutes(10);
+    #endregion
+    /*───────────────────────────────────────────────────────────────────────────*/
+
     private readonly DnsServer _server;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<DnsProxyServer> _log;
 
+    /*-------------------------------------------------------------------------*/
     public DnsProxyServer(IServiceScopeFactory scopeFactory,
                           ILogger<DnsProxyServer> log)
     {
@@ -18,9 +39,7 @@ public class DnsProxyServer : IDisposable
         _log = log ?? throw new ArgumentNullException(nameof(log));
 
         var bind = new IPEndPoint(IPAddress.Any, 53);
-        _server = new DnsServer(bindEndPoint: bind,
-                                udpListenerCount: 1,
-                                tcpListenerCount: 0);
+        _server = new DnsServer(bindEndPoint: bind, udpListenerCount: 1, tcpListenerCount: 0);
 
         _server.QueryReceived += OnQueryAsync;
     }
@@ -28,21 +47,18 @@ public class DnsProxyServer : IDisposable
     public void Start() => _server.Start();
     public void Dispose() => _server.Stop();
 
-    private async Task OnQueryAsync(object sender, QueryReceivedEventArgs e)
+    /*-------------------------------------------------------------------------*/
+    private async Task OnQueryAsync(object? sender, QueryReceivedEventArgs e)
     {
         if (e.Query is not DnsMessage req) return;
 
-        var q = req.Questions.FirstOrDefault(x => x.RecordType == RecordType.A);
-        if (q == null)
-        {
-            e.Response = req.CreateResponseInstance();
-            return;
-        }
+        var q = req.Questions.FirstOrDefault(z => z.RecordType == RecordType.A);
+        if (q is null) { e.Response = req.CreateResponseInstance(); return; }
 
-        var domain = q.Name.ToString().TrimEnd('.');
-        var clientIp = e.RemoteEndpoint?.Address.ToString() ?? "0.0.0.0";
+        string domain = q.Name.ToString().TrimEnd('.');
+        string clientIp = e.RemoteEndpoint?.Address.ToString() ?? "0.0.0.0";
 
-        // здесь открываем scope и получаем все scoped-сервисы
+        // ── достаём scoped-сервисы
         using var scope = _scopeFactory.CreateScope();
         var rules = scope.ServiceProvider.GetRequiredService<IRuleService>();
         var cache = scope.ServiceProvider.GetRequiredService<ICacheService>();
@@ -50,23 +66,19 @@ public class DnsProxyServer : IDisposable
         var stats = scope.ServiceProvider.GetRequiredService<IStatisticsService>();
         var resolver = scope.ServiceProvider.GetRequiredService<IResolverService>();
 
-        // собственно «конвейер»
+        // ── конвейер
         var (ip, ttl, upstream, rcode) =
             await ExecuteAsync(clientIp, domain, rules, cache, conf, stats, resolver);
 
+        // ── формируем ответ
         var resp = req.CreateResponseInstance();
 
         if (rcode == "BLOCK")
         {
-            // вариант A ― NXDOMAIN
-            //resp.ReturnCode = ReturnCode.NxDomain;
-
-            // вариант B ― отдать «чёрную дырку»
-            resp.AnswerRecords.Add(
-                new ARecord(q.Name, 60, IPAddress.Any));   // 0.0.0.0
-            
+            // отправляем «чёрную дыру» (0.0.0.0)
+            resp.AnswerRecords.Add(new ARecord(q.Name, 60, IPAddress.Any));
         }
-        else if (ip == null)
+        else if (ip is null)
         {
             resp.ReturnCode = ReturnCode.NxDomain;
         }
@@ -75,25 +87,25 @@ public class DnsProxyServer : IDisposable
             resp.AnswerRecords.Add(new ARecord(q.Name, ttl, ip));
         }
 
-        _log.LogInformation("DNS {domain} ← {client} => {ip} via {up} ({rc})",
-                            domain, clientIp,
-                            ip?.ToString() ?? "-", upstream, rcode);
+        _log.LogInformation("DNS {dom} ← {cli} ⇒ {ans} via {up} ({rc})",
+                            domain, clientIp, ip?.ToString() ?? "-", upstream, rcode);
 
         e.Response = resp;
     }
 
+    /*-------------------------------------------------------------------------*/
     private static async Task<(IPAddress? ip, int ttl, string upstream, string rcode)>
         ExecuteAsync(string clientIp,
                      string domain,
                      IRuleService rulesSvc,
                      ICacheService cache,
-                     IDnsConfigService conf,
+                     IDnsConfigService cfg,
                      IStatisticsService stats,
                      IResolverService resolver)
     {
-        // 1. правила
+        /* ① ─ правила */
         var rules = await rulesSvc.GetAllAsync();
-        var (act, rewrite, include, exclude) =
+        var (act, rewrite, includeCsv, excludeCsv, forceId) =
             RuleHelper.Apply(rules, clientIp, domain);
 
         if (act == RuleAction.Block)
@@ -103,29 +115,48 @@ public class DnsProxyServer : IDisposable
             IPAddress.TryParse(rewrite, out var ipRw))
             return (ipRw, 60, "REWRITE", "NOERROR");
 
-        // 2. кэш
+        /* ② ─ кэш */
         if (cache.TryGet(domain, out var c))
             return (c.ip, c.ttl, "CACHE", "NOERROR");
 
-        // 3. upstream
-        var pool = await RuleExtensions.FilterServers(conf, include, exclude);
-        var (ip, ttl, up, diag) = await resolver.ResolveAsync(domain, pool);
+        /* ③ ─ апстрим-пул (include / exclude / force) */
+        var pool = await cfg.FilterServers(includeCsv, excludeCsv, forceId);
 
-        // 4. сохраняем в кэш, если есть ответ
-        if (ip != null)
-            cache.Set(domain, ip, ttl);
+        /* ④ ─ резолв (+ до 10 ретраев для Force-сервера) */
+        IPAddress? ip = null;
+        int ttl = 0;
+        string up = "-";
+        string diag = "NXDOMAIN";
 
-        // 5. статистика
+        if (forceId is not null && pool.Count == 1)
+        {
+            for (int i = 0; i < FORCE_RETRY_MAX; i++)
+            {
+                (ip, ttl, up, diag) = await resolver.ResolveAsync(domain, pool);
+                if (ip is not null) break;               // успех
+            }
+            if (ip is null) diag = "NXDOMAIN";
+        }
+        else
+        {
+            (ip, ttl, up, diag) = await resolver.ResolveAsync(domain, pool);
+        }
+
+        /* ⑤ ─ кэширование */
+        if (ip is not null) cache.Set(domain, ip, ttl);
+
+        /* ⑥ ─ статистика */
         await stats.AddAsync(new VisitStatistic
         {
             Timestamp = DateTime.UtcNow,
             ClientIp = clientIp,
             Domain = domain,
             Upstream = up,
+            Rcode = diag,
             Action = act
         });
 
-        // rcode: либо текст из diag ("NOERROR","NXDOMAIN" или сообщение об ошибке)
-        return (ip, ttl, up, ip == null && diag == "NOERROR" ? "NXDOMAIN" : diag);
+        return (ip, ttl, up,
+                ip is null && diag == "NOERROR" ? "NXDOMAIN" : diag);
     }
 }

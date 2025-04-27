@@ -1,0 +1,109 @@
+﻿@model DnsProxy.Pages.Rules.EditViewModel
+@addTagHelper *, Microsoft.AspNetCore.Mvc.TagHelpers
+
+<div class="modal-header">
+    <h5 class="modal-title">
+        @(Model.Id == 0 ? "Новое правило" : "Редактирование")
+    </h5>
+    <button type="button" class="btn-close btn-close-white"
+            data-bs-dismiss="modal"></button>
+</div>
+
+<form asp-page-handler="Save"
+      method="post"
+      data-ajax="true"                 
+      data-ajax-mode="replace"
+      data-ajax-update="#ruleModalBody"
+      data-ajax-begin="onBegin"
+      data-ajax-success="onSaved"
+      data-ajax-failure="onFail"
+      class="needs-validation p-0">
+
+    @Html.AntiForgeryToken()
+    <input type="hidden" asp-for="Id" />
+
+    <div class="modal-body p-3">
+        <!-- IP -->
+        <div class="mb-2">
+            <label asp-for="SourceIp" class="form-label fw-bold"></label>
+            <input asp-for="SourceIp" class="form-control form-control-sm" />
+        </div>
+
+        <!-- Domain -->
+        <div class="mb-2">
+            <label asp-for="DomainPattern" class="form-label fw-bold"></label>
+            <input asp-for="DomainPattern" class="form-control form-control-sm" />
+        </div>
+
+        <!-- Action -->
+        <div class="mb-2">
+            <label asp-for="Action" class="form-label fw-bold"></label>
+            <select asp-for="Action"
+                    asp-items="Html.GetEnumSelectList<RuleAction>()"
+                    class="form-select form-select-sm"
+                    onchange="toggleExtra(this.value)">
+            </select>
+        </div>
+
+        <!-- Rewrite IP -->
+        <div id="rwBlock" class="mb-2">
+            <label asp-for="RewriteIp" class="form-label fw-bold"></label>
+            <input asp-for="RewriteIp" class="form-control form-control-sm" />
+        </div>
+
+        <!-- Force server -->
+        <div id="fsBlock" class="mb-2">
+            <label class="form-label fw-bold">Форсировать сервер</label>
+            <select asp-for="ForceServerId"
+                    asp-items="Model.ServerSelect"
+                    class="form-select form-select-sm">
+                <option value="">— не выбирать —</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="modal-footer">
+        <button class="btn btn-success btn-sm">
+            <i class="bi bi-check-lg"></i> Сохранить
+        </button>
+        <button type="button" class="btn btn-secondary btn-sm"
+                data-bs-dismiss="modal">
+            Отмена
+        </button>
+    </div>
+</form>
+
+<script>
+    /* ——— показать/скрыть блоки при открытии и при смене Action ——— */
+    function toggleExtra(action){
+        document.getElementById('rwBlock')
+                .classList.toggle('d-none', action!=='Rewrite');
+        document.getElementById('fsBlock')
+                .classList.toggle('d-none', action!=='Allow');
+    }
+
+    /* первый вызов */
+    toggleExtra('@Model.Action');
+
+    /* unobtrusive-ajax callbacks */
+    function onBegin(){ }
+    function onFail(xhr){ alert(xhr.statusText||'Ошибка'); }
+        function onSaved(data) {
+            /* если сервер вернул partial-html → data будет строкой, а не объектом  */
+            if (typeof data !== 'object' || !data.ok) return;
+
+            /* 1. прячем модалку */
+            bootstrap.Modal.getOrCreateInstance('#ruleModal').hide();
+
+            /* 2. показываем toast */
+            const t = bootstrap.Toast.getOrCreateInstance('#saveToast');
+            t.show();
+
+            /* 3. перезагружаем таблицу (чтобы увидеть новую / изменённую строку) */
+            setTimeout(()=>location.reload(), 300);   // даём юзеру увидеть «Сохранено!»
+        }
+
+        function onFail(xhr, status, error) {
+            alert('Ошибка: ' + (xhr.responseText || status));
+        }
+</script>

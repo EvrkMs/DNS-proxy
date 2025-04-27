@@ -12,7 +12,12 @@ public class DnsConfigService(AppDbContext db) : IDnsConfigService
 
 public class RuleService(AppDbContext db) : IRuleService
 {
-    public Task<List<DnsRule>> GetAllAsync() => db.Rules.ToListAsync();
+    public async Task<List<DnsRule>> GetAllAsync(bool includeForce = false)
+    {
+        IQueryable<DnsRule> q = db.Rules;
+        if (includeForce) q = q.Include(r => r.ForceServer);
+        return await q.ToListAsync();
+    }
 }
 
 public class StatisticsService(AppDbContext db) : IStatisticsService

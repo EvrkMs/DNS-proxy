@@ -1,25 +1,102 @@
 @page
-@using DnsProxy.Pages
 @model DnsProxy.Pages.IndexModel
-<h2>Последние запросы</h2>
 @{
-    Layout = "_Layout";   // берётся Pages/Shared/_Layout.cshtml
+    Layout = "_Layout";
 }
 
-<table class="table table-hover table-dark table-sm">
-    <thead><tr>
-        <th>Время</th><th>Клиент</th><th>Домен</th><th>Upstream</th><th>Действие</th>
-    </tr></thead>
-    <tbody>
-    @foreach (var s in Model.Items)
-    {
-        <tr>
-            <td>@s.Timestamp.ToLocalTime()</td>
-            <td>@s.ClientIp</td>
-            <td>@s.Domain</td>
-            <td>@s.Upstream</td>
-            <td>@s.Action</td>
-        </tr>
-    }
-    </tbody>
-</table>
+<h2 class="mb-3">Последние запросы</h2>
+
+<div class="d-flex gap-2 mb-2">
+    <!-- ▸ что фильтруем -->
+    <select id="filterField" class="form-select form-select-sm" style="max-width:160px">
+        <option value="any">Все поля</option>
+        <option value="client">Клиент IP</option>
+        <option value="domain">Домен</option>
+        <option value="upstream">Upstream</option>
+    </select>
+
+    <!-- ▸ поисковая строка -->
+    <input id="logSearch" class="form-control form-control-sm flex-grow-1"
+           placeholder="фильтр…" oninput="filterLog(this.value)" />
+
+    <button class="btn btn-outline-light btn-sm"
+            onclick="location.reload()">
+        ↻ обновить
+    </button>
+</div>
+
+<div class="table-responsive">
+    <table class="table table-dark table-hover table-sm align-middle log-table">
+        <thead class="table-primary text-center text-uppercase small">
+            <tr>
+                <th style="min-width:120px">Время</th>
+                <th>Клиент</th>
+                <th>Домен</th>
+                <th>Upstream</th>
+                <th style="width:80px;">RCODE</th>
+                <th style="width:80px;">Действие</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var s in Model.Items)
+            {
+                <tr data-client="@s.ClientIp"
+                    data-domain="@s.Domain"
+                    data-upstream="@(s.Upstream ?? "")">
+
+                    <td>@s.Timestamp.ToLocalTime()</td>
+                    <td class="text-muted">@s.ClientIp</td>
+                    <td>@s.Domain</td>
+                    <td>@(string.IsNullOrEmpty(s.Upstream) ? "—" : s.Upstream)</td>
+
+                    <td class="text-center">
+                        @{
+                            var badge = s.Rcode switch
+                            {
+                                "NOERROR" => "<span class='badge bg-success'>OK</span>",
+                                "NXDOMAIN" => "<span class='badge bg-warning text-dark'>NX</span>",
+                                _ => $"<span class='badge bg-danger' title='{s.Rcode}'>ERR</span>"
+                            };
+                            @Html.Raw(badge)
+                            ;
+                        }
+                    </td>
+
+                    <td class="text-center">
+                        @{
+                            var icon = s.Action switch
+                            {
+                                RuleAction.Allow => "check-lg text-success\" title=\"Allow",
+                                RuleAction.Block => "x-lg text-danger\"    title=\"Block",
+                                RuleAction.Rewrite => "arrow-repeat text-warning\" title=\"Rewrite",
+                                _ => ""
+                            };
+                            <i class="bi bi-@icon"></i>
+                            ;
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+@section Scripts {
+    <script>
+        /* фильтрация лога */
+        function filterLog(query) {
+            const mode  = document.getElementById('filterField').value;   // any | client | domain | upstream
+            query = query.trim().toLowerCase();
+
+            document.querySelectorAll('.log-table tbody tr').forEach(tr => {
+                const hay =
+                    mode === 'client'   ? tr.dataset.client.toLowerCase()   :
+                    mode === 'domain'   ? tr.dataset.domain.toLowerCase()   :
+                    mode === 'upstream' ? tr.dataset.upstream.toLowerCase() :
+                                          (tr.innerText || '').toLowerCase();   // any
+
+                tr.style.display = hay.includes(query) ? '' : 'none';
+            });
+        }
+    </script>
+}

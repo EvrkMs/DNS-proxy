@@ -1,4 +1,6 @@
-.table-dark td, .table-dark th {
+/* wwwroot/css/site.css */
+.table-dark td,
+.table-dark th {
     vertical-align: middle;
 }
 
@@ -7,9 +9,81 @@
     cursor: pointer;
 }
 
-/* кнопка по-человечески кликается целиком */
+/* чтобы клик шёл по кнопке, а не по иконке */
 .btn-danger .bi,
 .btn-primary .bi,
 .btn-success .bi {
     pointer-events: none;
+}
+.table-dark td,
+.table-dark th {
+    vertical-align: middle;
+}
+
+.badge {
+    font-size: .65rem;
+}
+
+    .badge.bg-info {
+        color: #212529
+    }
+/* читабельная подпись */
+
+i.bi {
+    pointer-events: none;
+}
+.log-table-wrapper { /* обёртка с overflow */
+    max-height: 70vh;
+    overflow: auto;
+}
+
+/* липкая «шапка» */
+.log-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    box-shadow: 0 2px 4px rgba(0,0,0,.4);
+}
+
+/* лёгкая тень у строк при наведении */
+.log-table tbody tr:hover {
+    background: #343a40 !important; /* чуть светлее */
+    box-shadow: inset 0 0 4px rgba(255,255,255,.08);
+}
+.badge {
+    border-radius: .5rem;
+    font-size: .65rem;
+    padding: .35em .55em;
+}
+
+.table-sm td {
+    padding: .35rem .5rem;
+}
+/* ---------- Rules table ---------- */
+.rules-table thead th {
+    cursor: pointer
+}
+
+.rules-table tbody tr:hover {
+    background: #222 !important;
+}
+
+.rules-table .sort-icon {
+    font-size: .7rem;
+    opacity: .5;
+}
+
+.rules-table th[data-sort] .sort-icon::before {
+    content: '▲'; /* иконка по-умолчанию – чтобы столбик “живой” */
+    visibility: hidden;
+}
+
+.rules-table th[data-dir="asc"] .sort-icon::before {
+    visibility: visible;
+    content: '▲';
+}
+
+.rules-table th[data-dir="desc"] .sort-icon::before {
+    visibility: visible;
+    content: '▼';
 }
