@@ -1,9 +1,9 @@
-﻿using Microsoft.AspNetCore.Mvc.Rendering;
-using DnsProxy.Data;
+﻿using DnsProxy.Data;
 using DnsProxy.Models;
 using DnsProxy.Services;
-using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.RazorPages;
+using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.EntityFrameworkCore;
 
 namespace DnsProxy.Pages.Rules

@@ -1,3 +1,4 @@
+using System.Net;
 using DnsProxy.Data;
 using DnsProxy.Services;
 using Microsoft.EntityFrameworkCore;
@@ -54,9 +55,28 @@ app.UseRouting();             // 2
 app.UseAuthorization();       // 2 (останется no-op, пока auth не добавишь)
 
 app.MapRazorPages();
+app.Use(async (context, next) =>
+{
+    var path = context.Request.Path;
+
+    // Разрешаем доступ к Razor Pages только с localhost
+    if (path.StartsWithSegments("/admin") || path.StartsWithSegments("/"))
+    {
+        var remoteIp = context.Connection.RemoteIpAddress;
+        if (!IPAddress.IsLoopback(remoteIp))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsync("403 - Forbidden");
+            return;
+        }
+    }
+
+    await next();
+});
+
 app.MapPost("/admin/flush", (ICacheService c) =>
 {
-    if (c is MemoryCacheService m) m.Clear();
+    c.Clear();
     Log.Logger.Information("Cache flushed");
     return Results.NoContent();
 });

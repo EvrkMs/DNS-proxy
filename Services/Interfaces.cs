@@ -18,4 +18,6 @@ public interface ICacheService
 {
     bool TryGet(string key, out (System.Net.IPAddress ip, int ttl) entry);
     void Set(string key, System.Net.IPAddress ip, int ttl);
+    void Clear();
+    IEnumerable<string> GetAllKeys();
 }

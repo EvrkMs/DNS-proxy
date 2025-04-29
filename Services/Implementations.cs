@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using DnsProxy.Data;
 using DnsProxy.Models;
@@ -28,15 +29,27 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
         await db.SaveChangesAsync();
     }
 }
-
-public class MemoryCacheService(IMemoryCache cache) : ICacheService
+public static class CacheStore
 {
-    record Entry(IPAddress Ip, DateTime Exp);
-    private readonly MemoryCache _inner = new(new MemoryCacheOptions());
+    private static MemoryCache cache = new(new MemoryCacheOptions
+    {
+        SizeLimit = 4048 // Устанавливаем лимит размера кэша
+    });
+    private static ConcurrentDictionary<string, bool> keys = new();
+
+    public static MemoryCache Cache { get => cache; set => cache = value; }
+    public static ConcurrentDictionary<string, bool> Keys { get => keys; set => keys = value; }
+}
+
+
+public class MemoryCacheService : ICacheService
+{
+
+    private record Entry(IPAddress Ip, DateTime Exp);
 
     public bool TryGet(string key, out (IPAddress ip, int ttl) entry)
     {
-        if (cache.TryGetValue<Entry>(key, out var e) && e.Exp > DateTime.UtcNow)
+        if (CacheStore.Cache.TryGetValue<Entry>(key, out var e) && e.Exp > DateTime.UtcNow)
         {
             entry = (e.Ip, (int)(e.Exp - DateTime.UtcNow).TotalSeconds);
             return true;
@@ -48,11 +61,30 @@ public class MemoryCacheService(IMemoryCache cache) : ICacheService
     public void Set(string key, IPAddress ip, int ttl)
     {
         var e = new Entry(ip, DateTime.UtcNow.AddSeconds(ttl));
-        cache.Set(key, e, TimeSpan.FromSeconds(ttl));
+        var options = new MemoryCacheEntryOptions
+        {
+            AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(ttl),
+            Size = 1 // Размер записи
+        };
+
+        // Регистрируем обратный вызов при удалении элемента из кэша
+        options.RegisterPostEvictionCallback((evictedKey, value, reason, state) =>
+        {
+            CacheStore.Keys.TryRemove(evictedKey.ToString(), out _);
+        });
+
+        CacheStore.Cache.Set(key, e, options);
+        CacheStore.Keys[key] = true;
     }
+
     public void Clear()
     {
-        // просто очищаем всё
-        _inner.Compact(1.0);
+        CacheStore.Cache.Compact(1.0); // Удаляем все записи из кэша
+        CacheStore.Keys.Clear(); // Очищаем список ключей
+    }
+
+    public IEnumerable<string> GetAllKeys()
+    {
+        return CacheStore.Keys.Keys;
     }
 }

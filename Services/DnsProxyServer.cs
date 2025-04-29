@@ -3,6 +3,7 @@
 // -----------------------------------------------------------------------------
 
 using System.Collections.Concurrent;
+using System.Data;
 using System.Net;
 using ARSoft.Tools.Net.Dns;
 using DnsProxy.Models;
@@ -44,7 +45,7 @@ public sealed class DnsProxyServer : IDisposable
         _server.QueryReceived += OnQueryAsync;
     }
 
-    public void Start() => _server.Start();
+    public void Start() { _server.Start(); StartForceCacheUpdater(); }
     public void Dispose() => _server.Stop();
 
     /*-------------------------------------------------------------------------*/
@@ -115,12 +116,13 @@ public sealed class DnsProxyServer : IDisposable
             IPAddress.TryParse(rewrite, out var ipRw))
             return (ipRw, 60, "REWRITE", "NOERROR");
 
-        /* ② ─ кэш */
-        if (cache.TryGet(domain, out var c))
-            return (c.ip, c.ttl, "CACHE", "NOERROR");
 
         /* ③ ─ апстрим-пул (include / exclude / force) */
         var pool = await cfg.FilterServers(includeCsv, excludeCsv, forceId);
+
+        /* ② ─ кэш */
+        if (cache.TryGet(domain, out var c))
+            return (c.ip, c.ttl, "CACHE", "NOERROR");
 
         /* ④ ─ резолв (+ до 10 ретраев для Force-сервера) */
         IPAddress? ip = null;
@@ -143,7 +145,7 @@ public sealed class DnsProxyServer : IDisposable
         }
 
         /* ⑤ ─ кэширование */
-        if (ip is not null) cache.Set(domain, ip, ttl);
+        if (ip is not null && ip != IPAddress.Parse("0.0.0.0")) cache.Set(domain, ip, ttl);
 
         /* ⑥ ─ статистика */
         await stats.AddAsync(new VisitStatistic
@@ -159,4 +161,64 @@ public sealed class DnsProxyServer : IDisposable
         return (ip, ttl, up,
                 ip is null && diag == "NOERROR" ? "NXDOMAIN" : diag);
     }
+    public void StartForceCacheUpdater()
+    {
+        Task.Run(async () =>
+        {
+            while (true)
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var rulesSvc = scope.ServiceProvider.GetRequiredService<IRuleService>();
+                var resolver = scope.ServiceProvider.GetRequiredService<IResolverService>();
+                var cache = scope.ServiceProvider.GetRequiredService<ICacheService>();
+                var conf = scope.ServiceProvider.GetRequiredService<IDnsConfigService>();
+
+                var rules = await rulesSvc.GetAllAsync();
+                var forceRules = rules.Where(r => r.ForceServerId is not null).ToList();
+
+                var now = DateTime.UtcNow;
+                int? minTtl = null;
+                var needsResolve = new List<(DnsRule rule, List<DnsServerEntry> pool)>();
+
+                foreach (var rule in forceRules)
+                {
+                    if (cache.TryGet(rule.DomainPattern, out var cached))
+                    {
+                        if (cached.ttl > 0)
+                        {
+                            if (minTtl is null || cached.ttl < minTtl)
+                                minTtl = cached.ttl;
+                            continue;
+                        }
+                    }
+
+                    var pool = await conf.FilterServers(rule.IncludeServers, rule.ExcludeServers, rule.ForceServerId);
+                    if (pool.Count > 0)
+                        needsResolve.Add((rule, pool));
+                }
+
+                foreach (var (rule, pool) in needsResolve)
+                {
+                    var (ip, ttl, _, diag) = await resolver.ResolveAsync(rule.DomainPattern, pool);
+                    if (ip != null && diag == "NOERROR")
+                    {
+                        cache.Set(rule.DomainPattern, ip, ttl);
+                        _log.LogInformation("Force cache updated: {domain} → {ip} (TTL: {ttl})", rule.DomainPattern, ip, ttl);
+
+                        if (minTtl is null || ttl < minTtl)
+                            minTtl = ttl;
+                    }
+                    else
+                    {
+                        _log.LogWarning("Failed to update force cache for domain: {domain}", rule.DomainPattern);
+                    }
+                }
+
+                // Минимальный TTL или дефолт 60 сек
+                var delay = TimeSpan.FromSeconds(minTtl ?? 60);
+                await Task.Delay(delay);
+            }
+        });
+    }
+
 }
