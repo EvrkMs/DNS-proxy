@@ -1,0 +1,52 @@
+﻿@page
+@model DnsProxy.Pages.Cache.CacheViewerModel
+@{
+    Layout = "_Layout";
+}
+
+<h2 class="mb-3">DNS-кэш</h2>
+
+<div class="d-flex gap-2 mb-2">
+    <input id="cacheSearch" class="form-control form-control-sm flex-grow-1"
+           placeholder="фильтр по домену или IP…" oninput="filterCache(this.value)" />
+
+    <button class="btn btn-outline-light btn-sm"
+            onclick="location.reload()">
+        ↻ обновить
+    </button>
+</div>
+
+<div class="table-responsive">
+    <table class="table table-dark table-hover table-sm align-middle cache-table">
+        <thead class="table-primary text-center text-uppercase small">
+            <tr>
+                <th>Домен</th>
+                <th>IP</th>
+                <th>TTL (сек)</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var e in Model.Entries)
+            {
+                <tr data-key="@e.Key" data-ip="@e.Ip">
+                    <td>@e.Key</td>
+                    <td class="text-muted">@e.Ip</td>
+                    <td class="text-center">@e.Ttl</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+@section Scripts {
+    <script>
+        function filterCache(query) {
+            query = query.trim().toLowerCase();
+
+            document.querySelectorAll('.cache-table tbody tr').forEach(tr => {
+                const hay = tr.dataset.key.toLowerCase() + ' ' + tr.dataset.ip.toLowerCase();
+                tr.style.display = hay.includes(query) ? '' : 'none';
+            });
+        }
+    </script>
+}

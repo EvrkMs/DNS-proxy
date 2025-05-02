@@ -38,9 +38,10 @@ builder.Services.AddHttpClient();
 builder.Services.AddScoped<IDnsConfigService, DnsConfigService>();
 builder.Services.AddScoped<IRuleService, RuleService>();
 builder.Services.AddScoped<IStatisticsService, StatisticsService>();
-builder.Services.AddScoped<ICacheService, MemoryCacheService>();
 builder.Services.AddScoped<IResolverService, ResolverService>();
+builder.Services.AddScoped<IConfigService, ConfigService>();
 
+builder.Services.AddSingleton<ICacheService, MemoryCacheService>();
 builder.Services.AddSingleton<DnsProxyServer>();
 builder.Services.AddHostedService<DnsBackground>();
 

@@ -48,3 +48,14 @@ public class VisitStatistic
     public string Rcode { get; set; } = "NOERROR";   // NEW («NOERROR», «NXDOMAIN», «TIMEOUT»…)
     public RuleAction Action { get; set; }
 }
+public enum ResolveStrategy
+{
+    FirstSuccess,  // классика, как сейчас
+    ParallelAll    // параллельно, берём первый успешный
+}
+public class DnsConfig
+{
+    public int Id { get; set; }
+    public ResolveStrategy Strategy { get; set; } = ResolveStrategy.FirstSuccess;
+
+}

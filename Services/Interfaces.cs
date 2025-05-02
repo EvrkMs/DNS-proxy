@@ -1,3 +1,4 @@
+using System.Net;
 using DnsProxy.Models;
 
 namespace DnsProxy.Services;
@@ -20,4 +21,5 @@ public interface ICacheService
     void Set(string key, System.Net.IPAddress ip, int ttl);
     void Clear();
     IEnumerable<string> GetAllKeys();
+    IEnumerable<(string Key, IPAddress Ip, int Ttl)> GetAllEntries();
 }

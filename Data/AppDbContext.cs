@@ -9,4 +9,5 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<DnsRule> Rules => Set<DnsRule>();
     public DbSet<DnsServerEntry> Servers => Set<DnsServerEntry>();
     public DbSet<VisitStatistic> Stats => Set<VisitStatistic>();
+    public DbSet<DnsConfig> ConfigDns => Set<DnsConfig>();
 }

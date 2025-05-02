@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using DnsProxy.Data;
 using DnsProxy.Models;
 
 namespace DnsProxy.Services
@@ -28,31 +29,40 @@ namespace DnsProxy.Services
 {
     /// <inheritdoc/>
     public class ResolverService(IHttpClientFactory httpFactory,
-                           ILogger<ResolverService> log) : IResolverService
+                           ILogger<ResolverService> log, IConfigService config) : IResolverService
     {
         private readonly IHttpClientFactory _httpFactory = httpFactory ?? throw new ArgumentNullException(nameof(httpFactory));
         private readonly ILogger<ResolverService> _log = log ?? throw new ArgumentNullException(nameof(log));
 
-        public async Task<(IPAddress? ip, int ttl, string upstream, string diag)> ResolveAsync(string domain, List<DnsServerEntry> pool)
+        private static readonly Random _rnd = new();
+
+        public async Task<(IPAddress? ip, int ttl, string upstream, string diag)> ResolveAsync(
+            string domain, List<DnsServerEntry> pool)
         {
-            Exception lastEx = null!;
+            if (pool.Count == 0)
+                return (null, 0, "-", "Empty pool");
+            var conf = await config.GetConfigAsync();
+            var strategy = conf?.Strategy ?? ResolveStrategy.FirstSuccess;
+
+            return strategy switch
+            {
+                ResolveStrategy.FirstSuccess => await ResolveSequentially(domain, pool),
+                ResolveStrategy.ParallelAll => await ResolveInParallel(domain, pool),
+                _ => throw new NotSupportedException($"Strategy {strategy} not supported"),
+            };
+        }
+        private async Task<(IPAddress?, int, string, string)> ResolveSequentially(string domain, List<DnsServerEntry> pool)
+        {
+            Exception? lastEx = null;
 
             foreach (var s in pool.OrderBy(p => p.Priority))
             {
                 try
                 {
-                    (IPAddress? ip, int ttl) result = s.Protocol switch
-                    {
-                        DnsProtocol.Udp => await QueryUdpAsync(domain, s),
-                        DnsProtocol.DoH_Wire => await QueryDoHWireManualAsync(domain, s),
-                        DnsProtocol.DoH_Json => await QueryDoHJsonAsync(domain, s),
-                        _ => throw new NotSupportedException($"Protocol {s.Protocol} not supported")
-                    };
-
+                    var result = await ResolveOne(domain, s);
                     if (result.ip != null)
-                        return (result.ip, result.ttl, s.Address, "NOERROR");
+                        return (result.ip, result.ttl, s.Address!, "NOERROR");
 
-                    // если сервис вернул NX без исключения, логгируем и идём дальше
                     _log.LogWarning("[{addr}] returned NXDOMAIN for {domain}", s.Address, domain);
                 }
                 catch (Exception ex)
@@ -62,15 +72,81 @@ namespace DnsProxy.Services
                 }
             }
 
-            // 1) если хотя бы один upstream выбросил исключение — вернём его текст
-            if (lastEx != null)
-                return (null, 0, pool.Last().Address, lastEx.GetBaseException().Message);
-
-            // 2) иначе — просто NXDOMAIN после всех попыток
-            return (null, 0, pool.Last().Address, "NXDOMAIN");
+            return lastEx != null
+                ? (null, 0, pool.Last().Address!, lastEx.GetBaseException().Message)
+                : (null, 0, pool.Last().Address!, "NXDOMAIN");
         }
+        private async Task<(IPAddress?, int, string, string)> ResolveInParallel(string domain, List<DnsServerEntry> pool)
+        {
+            var dohTasks = pool
+                .Where(s => s.Protocol != DnsProtocol.Udp)
+                .Select(server =>
+                    Task.Run(async () =>
+                    {
+                        try
+                        {
+                            var result = await ResolveOne(domain, server);
+                            return (result.ip, result.ttl, server.Address!, result.ip != null ? "NOERROR" : "NXDOMAIN");
+                        }
+                        catch (Exception ex)
+                        {
+                            return (null, 0, server.Address!, ex.GetBaseException().Message);
+                        }
+                    })
+                ).ToList();
 
+            // Сначала ждём DoH-потоки
+            while (dohTasks.Count > 0)
+            {
+                var finished = await Task.WhenAny(dohTasks);
+                dohTasks.Remove(finished);
 
+                var (ip, ttl, upstream, diag) = await finished;
+                if (ip != null)
+                    return (ip, ttl, upstream, diag);
+            }
+
+            // Если DoH не дали ответ — пробуем UDP
+            var udpTasks = pool
+                .Where(s => s.Protocol == DnsProtocol.Udp)
+                .Select(server =>
+                    Task.Run(async () =>
+                    {
+                        try
+                        {
+                            var result = await ResolveOne(domain, server);
+                            return (result.ip, result.ttl, server.Address!, result.ip != null ? "NOERROR" : "NXDOMAIN");
+                        }
+                        catch (Exception ex)
+                        {
+                            return (null, 0, server.Address!, ex.GetBaseException().Message);
+                        }
+                    })
+                ).ToList();
+
+            while (udpTasks.Count > 0)
+            {
+                var finished = await Task.WhenAny(udpTasks);
+                udpTasks.Remove(finished);
+
+                var (ip, ttl, upstream, diag) = await finished;
+                if (ip != null)
+                    return (ip, ttl, upstream, diag);
+            }
+
+            // Вообще ничего не сработало
+            return (null, 0, pool.Last().Address!, "NXDOMAIN");
+        }
+        private async Task<(IPAddress? ip, int ttl)> ResolveOne(string domain, DnsServerEntry s)
+        {
+            return s.Protocol switch
+            {
+                DnsProtocol.Udp => await QueryUdpAsync(domain, s),
+                DnsProtocol.DoH_Wire => await QueryDoHWireManualAsync(domain, s),
+                DnsProtocol.DoH_Json => await QueryDoHJsonAsync(domain, s),
+                _ => throw new NotSupportedException($"Protocol {s.Protocol} not supported")
+            };
+        }
         private async Task<(IPAddress?, int)> QueryUdpAsync(string domain, DnsServerEntry s)
         {
             // стандартный DNS по UDP через DnsClient
@@ -172,11 +248,10 @@ namespace DnsProxy.Services
             }
             return (null, 0);
         }
-
         private static byte[] BuildWireQuery(string domain)
         {
             // 12-byte DNS header
-            ushort id = (ushort)new Random().Next(0, 0x10000);
+            ushort id = (ushort)_rnd.Next(0, 0x10000);
             var header = new byte[]
             {
                 (byte)(id >> 8), (byte)id,

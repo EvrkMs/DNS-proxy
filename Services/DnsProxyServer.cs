@@ -31,10 +31,12 @@ public sealed class DnsProxyServer : IDisposable
     private readonly DnsServer _server;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<DnsProxyServer> _log;
+    private readonly ICacheService cache;
 
     /*-------------------------------------------------------------------------*/
     public DnsProxyServer(IServiceScopeFactory scopeFactory,
-                          ILogger<DnsProxyServer> log)
+                          ILogger<DnsProxyServer> log,
+                          ICacheService cache)
     {
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _log = log ?? throw new ArgumentNullException(nameof(log));
@@ -43,6 +45,7 @@ public sealed class DnsProxyServer : IDisposable
         _server = new DnsServer(bindEndPoint: bind, udpListenerCount: 1, tcpListenerCount: 0);
 
         _server.QueryReceived += OnQueryAsync;
+        this.cache = cache;
     }
 
     public void Start() { _server.Start(); StartForceCacheUpdater(); }
@@ -62,7 +65,6 @@ public sealed class DnsProxyServer : IDisposable
         // ── достаём scoped-сервисы
         using var scope = _scopeFactory.CreateScope();
         var rules = scope.ServiceProvider.GetRequiredService<IRuleService>();
-        var cache = scope.ServiceProvider.GetRequiredService<ICacheService>();
         var conf = scope.ServiceProvider.GetRequiredService<IDnsConfigService>();
         var stats = scope.ServiceProvider.GetRequiredService<IStatisticsService>();
         var resolver = scope.ServiceProvider.GetRequiredService<IResolverService>();
@@ -170,55 +172,53 @@ public sealed class DnsProxyServer : IDisposable
                 using var scope = _scopeFactory.CreateScope();
                 var rulesSvc = scope.ServiceProvider.GetRequiredService<IRuleService>();
                 var resolver = scope.ServiceProvider.GetRequiredService<IResolverService>();
-                var cache = scope.ServiceProvider.GetRequiredService<ICacheService>();
                 var conf = scope.ServiceProvider.GetRequiredService<IDnsConfigService>();
+                var cache = scope.ServiceProvider.GetRequiredService<ICacheService>();
 
                 var rules = await rulesSvc.GetAllAsync();
                 var forceRules = rules.Where(r => r.ForceServerId is not null).ToList();
 
                 var now = DateTime.UtcNow;
                 int? minTtl = null;
-                var needsResolve = new List<(DnsRule rule, List<DnsServerEntry> pool)>();
 
                 foreach (var rule in forceRules)
                 {
-                    if (cache.TryGet(rule.DomainPattern, out var cached))
+                    var allDomains = rule.DomainPattern
+                        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                        .Select(d => d.TrimStart('*').Trim('.'))
+                        .Distinct(StringComparer.OrdinalIgnoreCase);
+
+                    var pool = await conf.FilterServers(rule.IncludeServers, rule.ExcludeServers, rule.ForceServerId);
+                    if (pool.Count == 0)
+                        continue;
+
+                    foreach (var dom in allDomains)
                     {
-                        if (cached.ttl > 0)
+                        if (cache.TryGet(dom, out var cached) && cached.ttl > 0)
                         {
                             if (minTtl is null || cached.ttl < minTtl)
                                 minTtl = cached.ttl;
                             continue;
                         }
-                    }
 
-                    var pool = await conf.FilterServers(rule.IncludeServers, rule.ExcludeServers, rule.ForceServerId);
-                    if (pool.Count > 0)
-                        needsResolve.Add((rule, pool));
-                }
-
-                foreach (var (rule, pool) in needsResolve)
-                {
-                    var (ip, ttl, _, diag) = await resolver.ResolveAsync(rule.DomainPattern, pool);
-                    if (ip != null && diag == "NOERROR")
-                    {
-                        cache.Set(rule.DomainPattern, ip, ttl);
-                        _log.LogInformation("Force cache updated: {domain} → {ip} (TTL: {ttl})", rule.DomainPattern, ip, ttl);
-
-                        if (minTtl is null || ttl < minTtl)
-                            minTtl = ttl;
-                    }
-                    else
-                    {
-                        _log.LogWarning("Failed to update force cache for domain: {domain}", rule.DomainPattern);
+                        var (ip, ttl, _, diag) = await resolver.ResolveAsync(dom, pool);
+                        if (ip != null && diag == "NOERROR")
+                        {
+                            cache.Set(dom, ip, ttl);
+                            _log.LogInformation("Force cache updated: {domain} → {ip} (TTL: {ttl})", dom, ip, ttl);
+                            if (minTtl is null || ttl < minTtl)
+                                minTtl = ttl;
+                        }
+                        else
+                        {
+                            _log.LogWarning("Failed to update force cache for domain: {domain}", dom);
+                        }
                     }
                 }
 
-                // Минимальный TTL или дефолт 60 сек
-                var delay = TimeSpan.FromSeconds(minTtl ?? 60);
+                var delay = TimeSpan.FromSeconds(minTtl ?? 10);
                 await Task.Delay(delay);
             }
         });
     }
-
 }

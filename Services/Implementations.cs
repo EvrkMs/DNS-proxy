@@ -8,7 +8,7 @@ namespace DnsProxy.Services;
 
 public class DnsConfigService(AppDbContext db) : IDnsConfigService
 {
-    public Task<List<DnsServerEntry>> GetAllAsync() => db.Servers.OrderBy(s => s.Priority).ToListAsync();
+    public async Task<List<DnsServerEntry>> GetAllAsync() => await db.Servers.OrderBy(s => s.Priority).ToListAsync();
 }
 
 public class RuleService(AppDbContext db) : IRuleService
@@ -29,27 +29,21 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
         await db.SaveChangesAsync();
     }
 }
-public static class CacheStore
-{
-    private static MemoryCache cache = new(new MemoryCacheOptions
-    {
-        SizeLimit = 4048 // Устанавливаем лимит размера кэша
-    });
-    private static ConcurrentDictionary<string, bool> keys = new();
-
-    public static MemoryCache Cache { get => cache; set => cache = value; }
-    public static ConcurrentDictionary<string, bool> Keys { get => keys; set => keys = value; }
-}
 
 
 public class MemoryCacheService : ICacheService
 {
+    private readonly MemoryCache Cache = new(new MemoryCacheOptions
+    {
+        SizeLimit = 4048 // Устанавливаем лимит размера кэша
+    });
+    private readonly ConcurrentDictionary<string, bool> Keys = new();
 
     private record Entry(IPAddress Ip, DateTime Exp);
 
     public bool TryGet(string key, out (IPAddress ip, int ttl) entry)
     {
-        if (CacheStore.Cache.TryGetValue<Entry>(key, out var e) && e.Exp > DateTime.UtcNow)
+        if (Cache.TryGetValue<Entry>(key, out var e) && e.Exp > DateTime.UtcNow)
         {
             entry = (e.Ip, (int)(e.Exp - DateTime.UtcNow).TotalSeconds);
             return true;
@@ -70,21 +64,33 @@ public class MemoryCacheService : ICacheService
         // Регистрируем обратный вызов при удалении элемента из кэша
         options.RegisterPostEvictionCallback((evictedKey, value, reason, state) =>
         {
-            CacheStore.Keys.TryRemove(evictedKey.ToString(), out _);
+            Keys.TryRemove(evictedKey.ToString(), out _);
         });
 
-        CacheStore.Cache.Set(key, e, options);
-        CacheStore.Keys[key] = true;
+        Cache.Set(key, e, options);
+        Keys[key] = true;
     }
 
     public void Clear()
     {
-        CacheStore.Cache.Compact(1.0); // Удаляем все записи из кэша
-        CacheStore.Keys.Clear(); // Очищаем список ключей
+        Cache.Compact(1.0); // Удаляем все записи из кэша
+        Keys.Clear(); // Очищаем список ключей
     }
 
     public IEnumerable<string> GetAllKeys()
     {
-        return CacheStore.Keys.Keys;
+        return Keys.Keys;
+    }
+    public IEnumerable<(string Key, IPAddress Ip, int Ttl)> GetAllEntries()
+    {
+        foreach (var key in Keys.Keys)
+        {
+            if (Cache.TryGetValue<Entry>(key, out var e))
+            {
+                var ttl = (int)(e.Exp - DateTime.UtcNow).TotalSeconds;
+                if (ttl > 0)
+                    yield return (key, e.Ip, ttl);
+            }
+        }
     }
 }

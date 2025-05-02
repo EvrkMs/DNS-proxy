@@ -56,6 +56,17 @@
 }
 </tbody>
 </table>
+    <form method="post" asp-page-handler="SetStrategy" class="mb-3">
+        <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" id="strategyToggle"
+                   name="parallel" value="true"
+            @(Model.Parallel ? "checked" : "") onchange="this.form.submit()">
+            <label class="form-check-label" for="strategyToggle">
+                Использовать стратегию <strong>All-Success (параллельный запрос)</strong>
+            </label>
+        </div>
+    </form>
+
 </div>
 
 @section Scripts{
