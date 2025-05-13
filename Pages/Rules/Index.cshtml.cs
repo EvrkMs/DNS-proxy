@@ -8,14 +8,8 @@ using Microsoft.EntityFrameworkCore;
 
 namespace DnsProxy.Pages.Rules
 {
-    public class IndexModel : PageModel
+    public class IndexModel(AppDbContext db, IDnsConfigService cfg) : PageModel
     {
-        private readonly AppDbContext _db;
-        private readonly IDnsConfigService _cfg;
-
-        public IndexModel(AppDbContext db, IDnsConfigService cfg)
-        { _db = db; _cfg = cfg; }
-
         public List<DnsRule> Items { get; private set; } = [];
 
         /* -------- modal support -------- */
@@ -24,7 +18,7 @@ namespace DnsProxy.Pages.Rules
 
         public async Task OnGetAsync(int? id)
         {
-            Items = await _db.Rules.ToListAsync();
+            Items = await db.Rules.ToListAsync();
 
             if (id is not null)             // запрос «/Rules?id=5» → показать модалку
             {
@@ -37,7 +31,7 @@ namespace DnsProxy.Pages.Rules
         /* GET partial for JS-load ( /Rules?handler=Partial&id=... ) */
         public async Task<IActionResult> OnGetPartialAsync(int? id)
         {
-            var rule = await _db.Rules.FindAsync(id) ?? new DnsRule();
+            var rule = await db.Rules.FindAsync(id) ?? new DnsRule();
             var vm = new EditViewModel(rule);
             await FillServerSelectAsync(vm);
 
@@ -52,27 +46,27 @@ namespace DnsProxy.Pages.Rules
 
             DnsRule ent = vm.ToEntity();
 
-            if (ent.Id == 0) _db.Rules.Add(ent);
-            else _db.Rules.Update(ent);
+            if (ent.Id == 0) db.Rules.Add(ent);
+            else db.Rules.Update(ent);
 
-            await _db.SaveChangesAsync();
+            await db.SaveChangesAsync();
             return new JsonResult(new { ok = true });
         }
 
         /* POST delete */
         public async Task<IActionResult> OnPostDeleteAsync(int id)
         {
-            var r = await _db.Rules.FindAsync(id);
+            var r = await db.Rules.FindAsync(id);
             if (r is null) return NotFound();
-            _db.Rules.Remove(r);
-            await _db.SaveChangesAsync();
+            db.Rules.Remove(r);
+            await db.SaveChangesAsync();
             return RedirectToPage();
         }
 
         /* helpers */
         private async Task FillServerSelectAsync(EditViewModel? vm = null)
         {
-            var servers = await _cfg.GetAllAsync();
+            var servers = await cfg.GetAllAsync();
 
             ServerSelect = servers
                 .Select(s => new SelectListItem(
@@ -93,10 +87,12 @@ namespace DnsProxy.Pages.Rules
         public RuleAction Action { get; set; } = RuleAction.Allow;
         public string RewriteIp { get; set; } = string.Empty;
 
-        /* FK на Servers */
         public int? ForceServerId { get; set; }
 
         public List<SelectListItem> ServerSelect { get; set; } = [];
+
+        public List<int> IncludeServerIds { get; set; } = [];
+        public List<int> ExcludeServerIds { get; set; } = [];
 
         public EditViewModel() { }
 
@@ -107,7 +103,13 @@ namespace DnsProxy.Pages.Rules
             DomainPattern = r.DomainPattern;
             Action = r.Action;
             RewriteIp = r.RewriteIp;
-            ForceServerId = r.ForceServerId;          // <-- FK
+            ForceServerId = r.ForceServerId;
+
+            // Преобразуем строку вида "1,3" → List<int>
+            IncludeServerIds = r.IncludeServers?.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                                 .Select(int.Parse).ToList() ?? [];
+            ExcludeServerIds = r.ExcludeServers?.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                                 .Select(int.Parse).ToList() ?? [];
         }
 
         public DnsRule ToEntity() => new()
@@ -117,8 +119,9 @@ namespace DnsProxy.Pages.Rules
             DomainPattern = DomainPattern,
             Action = Action,
             RewriteIp = RewriteIp,
-            ForceServerId = ForceServerId            // <-- FK
-                                                     // ForceServer навигац-е свойство EF сам заполнит при SaveChanges
+            ForceServerId = ForceServerId,
+            IncludeServers = string.Join(',', IncludeServerIds),
+            ExcludeServers = string.Join(',', ExcludeServerIds),
         };
     }
 }

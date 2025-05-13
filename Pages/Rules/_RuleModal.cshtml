@@ -71,6 +71,26 @@
             Отмена
         </button>
     </div>
+    <!-- Include Servers -->
+    <div class="mb-2">
+        <label class="form-label fw-bold">Серверы (включить)</label>
+        <select asp-for="IncludeServerIds"
+                asp-items="Model.ServerSelect"
+                multiple
+                class="form-select form-select-sm">
+        </select>
+    </div>
+
+    <!-- Exclude Servers -->
+    <div class="mb-2">
+        <label class="form-label fw-bold">Серверы (исключить)</label>
+        <select asp-for="ExcludeServerIds"
+                asp-items="Model.ServerSelect"
+                multiple
+                class="form-select form-select-sm">
+        </select>
+    </div>
+
 </form>
 
 <script>
