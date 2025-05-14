@@ -28,10 +28,11 @@ namespace DnsProxy.Services
 namespace DnsProxy.Services
 {
     /// <inheritdoc/>
-    public class ResolverService(IHttpClientFactory httpFactory,
-                           ILogger<ResolverService> log, IConfigService config) : IResolverService
+    public class ResolverService(ILogger<ResolverService> log,
+                    IConfigService config,
+                    HttpClientPerServerService httpPerServer)
+                    : IResolverService
     {
-        private readonly IHttpClientFactory _httpFactory = httpFactory ?? throw new ArgumentNullException(nameof(httpFactory));
         private readonly ILogger<ResolverService> _log = log ?? throw new ArgumentNullException(nameof(log));
 
         private static readonly Random _rnd = new();
@@ -166,23 +167,20 @@ namespace DnsProxy.Services
 
         private async Task<(IPAddress?, int)> QueryDoHWireManualAsync(string domain, DnsServerEntry s)
         {
-            // 1. нормализуем URL
             var baseAddr = s.Address.TrimEnd('/');
             if (!baseAddr.Contains('/'))
                 baseAddr += "/dns-query";
 
-            // 2. собираем raw DNS-запрос вручную
             byte[] wire = BuildWireQuery(domain);
 
-            // 3. base64url
             string b64 = Convert.ToBase64String(wire)
-                             .TrimEnd('=')
-                             .Replace('+', '-')
-                             .Replace('/', '_');
+                                 .TrimEnd('=')
+                                 .Replace('+', '-')
+                                 .Replace('/', '_');
             var url = $"{baseAddr}?dns={b64}";
 
-            // 4. шлём GET HTTP/2 + Accept
-            var http = _httpFactory.CreateClient();
+            // ⚠ Используем кастомный клиент
+            var http = httpPerServer.GetOrCreate(s);
             var req = new HttpRequestMessage(HttpMethod.Get, url)
             {
                 Version = HttpVersion.Version20,
@@ -202,25 +200,22 @@ namespace DnsProxy.Services
             }
 
             var data = await resp.Content.ReadAsByteArrayAsync();
-            // 5. разбираем ответ вручную
             return ParseAFromWire(data);
         }
 
         private async Task<(IPAddress?, int)> QueryDoHJsonAsync(string domain, DnsServerEntry s)
         {
-            // 1. нормализуем URL
             var baseAddr = s.Address.TrimEnd('/');
             if (!baseAddr.Contains('/'))
                 baseAddr += "/resolve";
 
-            // 2. собираем QueryString
             var ub = new UriBuilder(baseAddr);
             var qs = System.Web.HttpUtility.ParseQueryString(ub.Query);
             qs["name"] = domain;
             qs["type"] = "A";
             ub.Query = qs.ToString();
 
-            var http = _httpFactory.CreateClient();
+            var http = httpPerServer.GetOrCreate(s);
             http.DefaultRequestHeaders.Accept.Clear();
             http.DefaultRequestHeaders.Accept
                 .Add(new MediaTypeWithQualityHeaderValue("application/dns-json"));

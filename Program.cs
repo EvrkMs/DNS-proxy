@@ -33,14 +33,13 @@ builder.Host.UseSerilog((ctx, lc) => lc
                   restrictedToMinimumLevel: LogEventLevel.Error,
                   retainedFileCountLimit: 7));
 
-builder.Services.AddHttpClient();
-
 builder.Services.AddScoped<IDnsConfigService, DnsConfigService>();
 builder.Services.AddScoped<IRuleService, RuleService>();
 builder.Services.AddScoped<IStatisticsService, StatisticsService>();
 builder.Services.AddScoped<IResolverService, ResolverService>();
 builder.Services.AddScoped<IConfigService, ConfigService>();
 
+builder.Services.AddSingleton<HttpClientPerServerService>();
 builder.Services.AddSingleton<ICacheService, MemoryCacheService>();
 builder.Services.AddSingleton<DnsProxyServer>();
 builder.Services.AddHostedService<DnsBackground>();
