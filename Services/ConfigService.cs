@@ -1,26 +1,24 @@
-﻿using System;
-using DnsProxy.Data;
+﻿using DnsProxy.Data;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
 
 namespace DnsProxy.Services
 {
     public interface IConfigService
     {
-        Task<Models.DnsConfig> GetConfigAsync();
-        Task SaveStrategyConfigAsync(Models.ResolveStrategy strategy);
+        Task<Models.DnsConfig> GetConfigAsync(CancellationToken token = default);
+        Task SaveStrategyConfigAsync(Models.ResolveStrategy strategy, CancellationToken token = default);
     }
 
     public class ConfigService(AppDbContext db, ILogger<ConfigService> log) : IConfigService
     {
-        public async Task<Models.DnsConfig> GetConfigAsync()
-            => await db.ConfigDns.AsNoTracking().FirstOrDefaultAsync();
+        public async Task<Models.DnsConfig> GetConfigAsync(CancellationToken token = default)
+            => await db.ConfigDns.AsNoTracking().FirstOrDefaultAsync(cancellationToken: token);
 
-        public async Task SaveStrategyConfigAsync(Models.ResolveStrategy strategy)
+        public async Task SaveStrategyConfigAsync(Models.ResolveStrategy strategy, CancellationToken token = default)
         {
             try
             {
-                var config = await db.ConfigDns.FirstOrDefaultAsync();
+                var config = await db.ConfigDns.FirstOrDefaultAsync(cancellationToken: token);
                 if (config is null)
                 {
                     log.LogWarning("Конфиг DNS не найден в базе данных.");
@@ -28,7 +26,7 @@ namespace DnsProxy.Services
                 }
 
                 config.Strategy = strategy;
-                await db.SaveChangesAsync();
+                await db.SaveChangesAsync(token);
                 log.LogInformation("Стратегия успешно сохранена: {Strategy}", strategy);
             }
             catch (Exception ex)

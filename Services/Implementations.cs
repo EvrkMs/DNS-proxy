@@ -1,5 +1,5 @@
 using System.Collections.Concurrent;
-using System.Net;
+using ARSoft.Tools.Net.Dns;
 using DnsProxy.Data;
 using DnsProxy.Models;
 using Microsoft.EntityFrameworkCore;
@@ -30,66 +30,71 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
     }
 }
 
-
 public class MemoryCacheService : ICacheService
 {
-    private readonly MemoryCache Cache = new(new MemoryCacheOptions
+    private readonly MemoryCache _cache = new(new MemoryCacheOptions
     {
-        SizeLimit = 4048 // Устанавливаем лимит размера кэша
+        SizeLimit = 4048
     });
-    private readonly ConcurrentDictionary<string, bool> Keys = new();
 
-    private record Entry(IPAddress Ip, DateTime Exp);
+    private readonly ConcurrentDictionary<string, bool> _keys = new();
 
-    public bool TryGet(string key, out (IPAddress ip, int ttl) entry)
+    private record Entry(DnsRecordBase[] Records, DateTime Exp);
+
+    private static string GetFullKey(string domain, RecordType type) => $"{domain}#{type}";
+
+    public bool TryGet(string domain, RecordType type, out (DnsRecordBase[] records, int ttl) entry)
     {
-        if (Cache.TryGetValue<Entry>(key, out var e) && e.Exp > DateTime.UtcNow)
+        var key = GetFullKey(domain, type);
+        if (_cache.TryGetValue<Entry>(key, out var e) && e.Exp > DateTime.UtcNow)
         {
-            entry = (e.Ip, (int)(e.Exp - DateTime.UtcNow).TotalSeconds);
+            var ttl = (int)(e.Exp - DateTime.UtcNow).TotalSeconds;
+            entry = (e.Records, ttl);
             return true;
         }
         entry = default;
         return false;
     }
 
-    public void Set(string key, IPAddress ip, int ttl)
+    public void Set(string domain, RecordType type, DnsRecordBase[] records, int ttl)
     {
-        var e = new Entry(ip, DateTime.UtcNow.AddSeconds(ttl));
+        var key = GetFullKey(domain, type);
+        var e = new Entry(records, DateTime.UtcNow.AddSeconds(ttl));
         var options = new MemoryCacheEntryOptions
         {
             AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(ttl),
-            Size = 1 // Размер записи
+            Size = 1
         };
 
-        // Регистрируем обратный вызов при удалении элемента из кэша
         options.RegisterPostEvictionCallback((evictedKey, value, reason, state) =>
         {
-            Keys.TryRemove(evictedKey.ToString(), out _);
+            _keys.TryRemove(evictedKey.ToString(), out _);
         });
 
-        Cache.Set(key, e, options);
-        Keys[key] = true;
+        _cache.Set(key, e, options);
+        _keys[key] = true;
     }
 
     public void Clear()
     {
-        Cache.Compact(1.0); // Удаляем все записи из кэша
-        Keys.Clear(); // Очищаем список ключей
+        _cache.Compact(1.0);
+        _keys.Clear();
     }
 
     public IEnumerable<string> GetAllKeys()
     {
-        return Keys.Keys;
+        return _keys.Keys;
     }
-    public IEnumerable<(string Key, IPAddress Ip, int Ttl)> GetAllEntries()
+
+    public IEnumerable<(string Key, DnsRecordBase[] Records, int Ttl)> GetAllEntries()
     {
-        foreach (var key in Keys.Keys)
+        foreach (var key in _keys.Keys)
         {
-            if (Cache.TryGetValue<Entry>(key, out var e))
+            if (_cache.TryGetValue<Entry>(key, out var e))
             {
                 var ttl = (int)(e.Exp - DateTime.UtcNow).TotalSeconds;
                 if (ttl > 0)
-                    yield return (key, e.Ip, ttl);
+                    yield return (key, e.Records, ttl);
             }
         }
     }

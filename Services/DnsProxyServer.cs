@@ -5,6 +5,8 @@
 using System.Collections.Concurrent;
 using System.Data;
 using System.Net;
+using System.Threading;
+using ARSoft.Tools.Net;
 using ARSoft.Tools.Net.Dns;
 using DnsProxy.Models;
 using DnsProxy.Utils;
@@ -19,12 +21,6 @@ public sealed class DnsProxyServer : IDisposable
         Val   = информация о неудачах / бане                                  */
     private record FailInfo(int Count, DateTime? BannedUntil);
     private const int FORCE_RETRY_MAX = 10;
-
-    private static readonly ConcurrentDictionary<(string domain, string up), FailInfo>
-        _fails = new();
-
-    private const int failThreshold = 5;                 // после 5 ошибок подряд
-    private static readonly TimeSpan banDuration = TimeSpan.FromMinutes(10);
     #endregion
     /*───────────────────────────────────────────────────────────────────────────*/
 
@@ -56,113 +52,105 @@ public sealed class DnsProxyServer : IDisposable
     {
         if (e.Query is not DnsMessage req) return;
 
-        var q = req.Questions.FirstOrDefault(z => z.RecordType == RecordType.A);
-        if (q is null) { e.Response = req.CreateResponseInstance(); return; }
-
-        string domain = q.Name.ToString().TrimEnd('.');
         string clientIp = e.RemoteEndpoint?.Address.ToString() ?? "0.0.0.0";
-
-        // ── достаём scoped-сервисы
-        using var scope = _scopeFactory.CreateScope();
-        var rules = scope.ServiceProvider.GetRequiredService<IRuleService>();
-        var conf = scope.ServiceProvider.GetRequiredService<IDnsConfigService>();
-        var stats = scope.ServiceProvider.GetRequiredService<IStatisticsService>();
-        var resolver = scope.ServiceProvider.GetRequiredService<IResolverService>();
-
-        // ── конвейер
-        var (ip, ttl, upstream, rcode) =
-            await ExecuteAsync(clientIp, domain, rules, cache, conf, stats, resolver);
-
-        // ── формируем ответ
         var resp = req.CreateResponseInstance();
 
-        if (rcode == "BLOCK")
+        foreach (var q in req.Questions)
         {
-            // отправляем «чёрную дыру» (0.0.0.0)
-            resp.AnswerRecords.Add(new ARecord(q.Name, 60, IPAddress.Any));
-        }
-        else if (ip is null)
-        {
-            resp.ReturnCode = ReturnCode.NxDomain;
-        }
-        else
-        {
-            resp.AnswerRecords.Add(new ARecord(q.Name, ttl, ip));
-        }
+            string domain = q.Name.ToString().TrimEnd('.');
+            var result = await ExecuteAsync(clientIp, domain, q.RecordType);
 
-        _log.LogInformation("DNS {dom} ← {cli} ⇒ {ans} via {up} ({rc})",
-                            domain, clientIp, ip?.ToString() ?? "-", upstream, rcode);
+            if (result.RCode == "BLOCK")
+            {
+                resp.AnswerRecords.Add(new ARecord(q.Name, 60, IPAddress.Any));
+            }
+            else if (result.Records.Length == 0)
+            {
+                resp.ReturnCode = ReturnCode.NxDomain;
+            }
+            else
+            {
+                foreach (var rec in result.Records)
+                    resp.AnswerRecords.Add(rec);
+            }
+
+            _log.LogInformation("DNS {dom} [{type}] ← {cli} ⇒ {ans} via {up} ({rc})",
+                domain, q.RecordType, clientIp,
+                result.Records.Length > 0 ? result.Records[0].ToString() : "-",
+                result.Upstream, result.RCode);
+        }
 
         e.Response = resp;
     }
 
     /*-------------------------------------------------------------------------*/
-    private static async Task<(IPAddress? ip, int ttl, string upstream, string rcode)>
-        ExecuteAsync(string clientIp,
-                     string domain,
-                     IRuleService rulesSvc,
-                     ICacheService cache,
-                     IDnsConfigService cfg,
-                     IStatisticsService stats,
-                     IResolverService resolver)
+    private async Task<DnsResolveResult> ExecuteAsync(string clientIp, string domain, RecordType type)
     {
-        /* ① ─ правила */
+        using var scope = _scopeFactory.CreateScope();
+        var rulesSvc = scope.ServiceProvider.GetRequiredService<IRuleService>();
+        var resolver = scope.ServiceProvider.GetRequiredService<IResolverService>();
+        var cfg = scope.ServiceProvider.GetRequiredService<IDnsConfigService>();
+        var stats = scope.ServiceProvider.GetRequiredService<IStatisticsService>();
+
         var rules = await rulesSvc.GetAllAsync();
         var (act, rewrite, includeCsv, excludeCsv, forceId) =
             RuleHelper.Apply(rules, clientIp, domain);
 
         if (act == RuleAction.Block)
-            return (null, 0, "-", "BLOCK");
+            return DnsResolveResult.Empty("-", "BLOCK");
 
-        if (act == RuleAction.Rewrite &&
-            IPAddress.TryParse(rewrite, out var ipRw))
-            return (ipRw, 60, "REWRITE", "NOERROR");
+        if (act == RuleAction.Rewrite && IPAddress.TryParse(rewrite, out var ipRw))
+        {
+            var rec = new ARecord(DomainName.Parse(domain), 60, ipRw);
+            return DnsResolveResult.Success([rec], 60, "REWRITE");
+        }
 
-
-        /* ③ ─ апстрим-пул (include / exclude / force) */
         var pool = await cfg.FilterServers(includeCsv, excludeCsv, forceId);
 
-        /* ② ─ кэш */
-        if (cache.TryGet(domain, out var c))
-            return (c.ip, c.ttl, "CACHE", "NOERROR");
+        if (cache.TryGet(domain, type, out var cached))
+            return new DnsResolveResult
+            {
+                Records = cached.records,
+                Ttl = cached.ttl,
+                Upstream = "CACHE",
+                RCode = "NOERROR"
+            };
 
-        /* ④ ─ резолв (+ до 10 ретраев для Force-сервера) */
-        IPAddress? ip = null;
-        int ttl = 0;
-        string up = "-";
-        string diag = "NXDOMAIN";
+        DnsResolveResult result;
 
         if (forceId is not null && pool.Count == 1)
         {
+            result = DnsResolveResult.Empty(pool[0].Address!, "NXDOMAIN");
+
             for (int i = 0; i < FORCE_RETRY_MAX; i++)
             {
-                (ip, ttl, up, diag) = await resolver.ResolveAsync(domain, pool);
-                if (ip is not null) break;               // успех
+                result = await resolver.ResolveAsync(domain, type, pool);
+                if (result.Records.Length > 0)
+                    break;
             }
-            if (ip is null) diag = "NXDOMAIN";
         }
         else
         {
-            (ip, ttl, up, diag) = await resolver.ResolveAsync(domain, pool);
+            result = await resolver.ResolveAsync(domain, type, pool);
         }
 
-        /* ⑤ ─ кэширование */
-        if (ip is not null && ip != IPAddress.Parse("0.0.0.0")) cache.Set(domain, ip, ttl);
+        if (result.Records.Length > 0)
+            cache.Set(domain, type, result.Records, result.Ttl);
 
-        /* ⑥ ─ статистика */
         await stats.AddAsync(new VisitStatistic
         {
             Timestamp = DateTime.UtcNow,
             ClientIp = clientIp,
             Domain = domain,
-            Upstream = up,
-            Rcode = diag,
+            Upstream = result.Upstream,
+            Rcode = result.RCode,
             Action = act
         });
 
-        return (ip, ttl, up,
-                ip is null && diag == "NOERROR" ? "NXDOMAIN" : diag);
+        return result;
     }
+
+
     public void StartForceCacheUpdater()
     {
         Task.Run(async () =>
@@ -194,20 +182,24 @@ public sealed class DnsProxyServer : IDisposable
 
                     foreach (var dom in allDomains)
                     {
-                        if (cache.TryGet(dom, out var cached) && cached.ttl > 0)
+                        // ⛳ по умолчанию кэшируем только A-записи
+                        var type = RecordType.A;
+
+                        if (cache.TryGet(dom, type, out var cached) && cached.ttl > 0)
                         {
                             if (minTtl is null || cached.ttl < minTtl)
                                 minTtl = cached.ttl;
                             continue;
                         }
-
-                        var (ip, ttl, _, diag) = await resolver.ResolveAsync(dom, pool);
-                        if (ip != null && diag == "NOERROR")
+                        var result = await resolver.ResolveAsync(dom, type, pool);
+                        if (result.Records.Length > 0 && result.RCode == "NOERROR")
                         {
-                            cache.Set(dom, ip, ttl);
-                            _log.LogInformation("Force cache updated: {domain} → {ip} (TTL: {ttl})", dom, ip, ttl);
-                            if (minTtl is null || ttl < minTtl)
-                                minTtl = ttl;
+                            cache.Set(dom, type, result.Records, result.Ttl);
+                            _log.LogInformation("Force cache updated: {domain} → {ip} (TTL: {ttl})",
+                                dom, string.Join(", ", result.Records.Select(r => r.ToString())), result.Ttl);
+
+                            if (minTtl is null || result.Ttl < minTtl)
+                                minTtl = result.Ttl;
                         }
                         else
                         {

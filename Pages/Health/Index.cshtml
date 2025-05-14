@@ -24,9 +24,9 @@
             <tr class="@(r.Ip == "-" ? "table-danger" : "")">
                 <td>@r.Server</td>
                 <td>@r.Proto</td>
-                <td>@r.Rcode</td>
+                <td class="@(r.Rcode == "NOERROR" ? "text-success" : "text-danger")">@r.Rcode</td>
                 <td>@r.Ip</td>
-                <td>@(r.Ttl == 0 ? "–" : r.Ttl)</td>
+                <td class="text-center" title="осталось секунд">@r.Ttl</td>
                 <td>@r.Ms</td>
             </tr>
         }

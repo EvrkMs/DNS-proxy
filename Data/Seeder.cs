@@ -20,7 +20,7 @@ public static class Seeder
             );
             await db.SaveChangesAsync();
         }
-        if(!db.ConfigDns.Any())
+        if (!db.ConfigDns.Any())
         {
             db.ConfigDns.Add(new DnsConfig { Strategy = ResolveStrategy.FirstSuccess });
             await db.SaveChangesAsync();

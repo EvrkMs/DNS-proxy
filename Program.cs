@@ -1,6 +1,7 @@
 using System.Net;
 using DnsProxy.Data;
 using DnsProxy.Services;
+using DnsProxy.Utils;
 using Microsoft.EntityFrameworkCore;
 using Serilog;
 using Serilog.Events;
@@ -38,8 +39,9 @@ builder.Services.AddScoped<IRuleService, RuleService>();
 builder.Services.AddScoped<IStatisticsService, StatisticsService>();
 builder.Services.AddScoped<IResolverService, ResolverService>();
 builder.Services.AddScoped<IConfigService, ConfigService>();
+builder.Services.AddScoped<QueryMethot>();
 
-builder.Services.AddSingleton<HttpClientPerServerService>();
+builder.Services.AddSingleton<IHttpClientPerServerService, HttpClientPerServerService>();
 builder.Services.AddSingleton<ICacheService, MemoryCacheService>();
 builder.Services.AddSingleton<DnsProxyServer>();
 builder.Services.AddHostedService<DnsBackground>();

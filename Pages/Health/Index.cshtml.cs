@@ -1,5 +1,6 @@
 ﻿// Pages/Health/Index.cshtml.cs
 using System.Diagnostics;
+using ARSoft.Tools.Net.Dns;
 using DnsProxy.Models;
 using DnsProxy.Services;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -13,7 +14,8 @@ public class IndexModel(IDnsConfigService cfg,
                       string Rcode,
                       string Ip,
                       int Ttl,
-                      long Ms);
+                      long Ms,
+                      string Type);
 
     public List<Row> Items { get; private set; } = [];
 
@@ -31,47 +33,41 @@ public class IndexModel(IDnsConfigService cfg,
     {
         var sw = Stopwatch.StartNew();
         var single = new List<DnsServerEntry> { s };
+
+        string proto = s.Protocol switch
+        {
+            DnsProtocol.Udp => "UDP",
+            DnsProtocol.DoH_Wire => "DoH-wire",
+            DnsProtocol.DoH_Json => "DoH-json",
+            _ => "Unknown"
+        };
+
         try
         {
-            // пытаемся резолвить через единственный сервер
-            var (ip, ttl, upstream, diag) = await resolver.ResolveAsync(domain, single);
+            var result = await resolver.ResolveAsync(domain, RecordType.A, single);
             sw.Stop();
-
-            // строим название протокола по enum
-            string proto = s.Protocol switch
-            {
-                DnsProtocol.Udp => "UDP",
-                DnsProtocol.DoH_Wire => "DoH-wire",
-                DnsProtocol.DoH_Json => "DoH-json",
-                _ => "Unknown"
-            };
 
             return new Row(
                 Server: s.Address,
                 Proto: proto,
-                Rcode: diag,                          // сюда попадает "NOERROR", "NXDOMAIN" или текст исключения
-                Ip: ip?.ToString() ?? "-",
-                Ttl: ip is null ? 0 : ttl,
-                Ms: sw.ElapsedMilliseconds
+                Rcode: result.RCode,
+                Ip: result.Records.OfType<ARecord>().FirstOrDefault()?.Address.ToString() ?? "-",
+                Ttl: result.Ttl,
+                Ms: sw.ElapsedMilliseconds,
+                Type: result.Records.FirstOrDefault()?.RecordType.ToString() ?? "Unknown"
             );
         }
         catch (Exception ex)
         {
             sw.Stop();
-            string proto = s.Protocol switch
-            {
-                DnsProtocol.Udp => "UDP",
-                DnsProtocol.DoH_Wire => "DoH-wire",
-                DnsProtocol.DoH_Json => "DoH-json",
-                _ => "Unknown"
-            };
             return new Row(
                 Server: s.Address,
                 Proto: proto,
-                Rcode: ex.GetBaseException().Message,  // детальный текст ошибки
+                Rcode: ex.GetBaseException().Message,
                 Ip: "-",
                 Ttl: 0,
-                Ms: sw.ElapsedMilliseconds
+                Ms: sw.ElapsedMilliseconds,
+                Type: "Error"
             );
         }
     }

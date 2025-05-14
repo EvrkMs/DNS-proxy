@@ -1,7 +1,8 @@
 ﻿using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
-using DnsClient;
+using ARSoft.Tools.Net;
+using ARSoft.Tools.Net.Dns;
 using DnsProxy.Models;
 
 namespace DnsProxy.Services
@@ -22,15 +23,6 @@ namespace DnsProxy.Services
 
             return _clients.GetOrAdd(server.Address, _ =>
             {
-                // Используем Google DNS или любой другой, можно вынести в конфиг
-                var dnsServer = "8.8.8.8";
-
-                var lookup = new LookupClient(new LookupClientOptions(IPAddress.Parse(dnsServer))
-                {
-                    UseCache = true,
-                    UseTcpFallback = true,
-                });
-
                 var handler = new SocketsHttpHandler
                 {
                     ConnectCallback = async (context, ct) =>
@@ -38,13 +30,7 @@ namespace DnsProxy.Services
                         var host = context.DnsEndPoint.Host;
                         var port = context.DnsEndPoint.Port;
 
-                        var result = await lookup.GetHostEntryAsync(host);
-                        var ip = result.AddressList
-                            .FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork);
-
-                        if (ip is null)
-                            throw new Exception($"Не удалось разрешить хост: {host}");
-
+                        var ip = await ResolveWithArsoft(host) ?? throw new Exception($"Не удалось разрешить хост: {host}");
                         var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
                         await socket.ConnectAsync(ip, port);
                         return new NetworkStream(socket, ownsSocket: true);
@@ -61,6 +47,21 @@ namespace DnsProxy.Services
                     Timeout = TimeSpan.FromSeconds(3)
                 };
             });
+        }
+
+        private static async Task<IPAddress?> ResolveWithArsoft(string host)
+        {
+            var dnsServer = IPAddress.Parse("8.8.8.8");
+
+            var resolver = new DnsStubResolver(new[] { dnsServer }, 3000);
+
+            var response = await resolver.ResolveAsync<ARecord>(
+                DomainName.Parse(host),
+                RecordType.A,
+                RecordClass.INet
+            );
+
+            return response.FirstOrDefault()?.Address;
         }
     }
 }

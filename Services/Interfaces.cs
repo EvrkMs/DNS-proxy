@@ -1,4 +1,4 @@
-using System.Net;
+using ARSoft.Tools.Net.Dns;
 using DnsProxy.Models;
 
 namespace DnsProxy.Services;
@@ -17,9 +17,9 @@ public interface IStatisticsService
 }
 public interface ICacheService
 {
-    bool TryGet(string key, out (System.Net.IPAddress ip, int ttl) entry);
-    void Set(string key, System.Net.IPAddress ip, int ttl);
+    bool TryGet(string domain, RecordType type, out (DnsRecordBase[] records, int ttl) entry);
+    void Set(string domain, RecordType type, DnsRecordBase[] records, int ttl);
     void Clear();
     IEnumerable<string> GetAllKeys();
-    IEnumerable<(string Key, IPAddress Ip, int Ttl)> GetAllEntries();
+    IEnumerable<(string Key, DnsRecordBase[] Records, int Ttl)> GetAllEntries();
 }
