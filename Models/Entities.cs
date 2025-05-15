@@ -1,4 +1,5 @@
 using System.Net;
+using ARSoft.Tools.Net.Dns;
 
 namespace DnsProxy.Models;
 
@@ -46,7 +47,8 @@ public class VisitStatistic
     public string? Upstream { get; set; }
 
     public string Rcode { get; set; } = "NOERROR";   // NEW («NOERROR», «NXDOMAIN», «TIMEOUT»…)
-    public RuleAction Action { get; set; }
+    public RecordType Type { get; set; } = RecordType.Invalid;
+    public RuleAction Action { get; set; } = RuleAction.Block;
 }
 public enum ResolveStrategy
 {

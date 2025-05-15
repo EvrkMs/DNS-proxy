@@ -4,24 +4,26 @@
     Layout = "_Layout";
 }
 
-<h2 class="mb-3">Последние запросы</h2>
+<h2 class="mb-3">Последние DNS-запросы</h2>
 
-<div class="d-flex gap-2 mb-2">
-    <!-- ▸ что фильтруем -->
-    <select id="filterField" class="form-select form-select-sm" style="max-width:160px">
+<form method="post" action="/admin/flushstat" class="mb-3 d-flex justify-content-end">
+    <button class="btn btn-danger btn-sm d-flex align-items-center" type="submit">
+        <i class="bi bi-trash me-1"></i> Очистить статистику
+    </button>
+</form>
+
+<div class="d-flex gap-2 mb-3 align-items-center">
+    <select id="filterField" class="form-select form-select-sm" style="max-width: 160px">
         <option value="any">Все поля</option>
         <option value="client">Клиент IP</option>
         <option value="domain">Домен</option>
         <option value="upstream">Upstream</option>
     </select>
 
-    <!-- ▸ поисковая строка -->
-    <input id="logSearch" class="form-control form-control-sm flex-grow-1"
-           placeholder="фильтр…" oninput="filterLog(this.value)" />
+    <input id="logSearch" class="form-control form-control-sm" placeholder="Поиск..." oninput="filterLog(this.value)" />
 
-    <button class="btn btn-outline-light btn-sm"
-            onclick="location.reload()">
-        ↻ обновить
+    <button type="button" class="btn btn-outline-light btn-sm" onclick="location.reload()">
+        <i class="bi bi-arrow-clockwise"></i>
     </button>
 </div>
 
@@ -34,58 +36,50 @@
                 <th>Домен</th>
                 <th>Upstream</th>
                 <th style="width:80px;">RCODE</th>
+                <th style="width:80px;">Тип</th>
                 <th style="width:80px;">Действие</th>
             </tr>
         </thead>
         <tbody>
-            @foreach (var s in Model.Items)
-            {
+        <tbody>
+                @foreach (var s in Model.Items)
+                {
                 <tr data-client="@s.ClientIp"
                     data-domain="@s.Domain"
-                    data-upstream="@(s.Upstream ?? "")">
-
+                    data-upstream="@s.Upstream">
                     <td>@s.Timestamp.ToLocalTime()</td>
                     <td class="text-muted">@s.ClientIp</td>
                     <td>@s.Domain</td>
-                    <td>@(string.IsNullOrEmpty(s.Upstream) ? "—" : s.Upstream)</td>
+                    <td>@(string.IsNullOrWhiteSpace(s.Upstream) ? "—" : s.Upstream)</td>
 
                     <td class="text-center">
-                        @{
-                            var badge = s.Rcode switch
-                            {
-                                "NOERROR" => "<span class='badge bg-success'>OK</span>",
-                                "NXDOMAIN" => "<span class='badge bg-warning text-dark'>NX</span>",
-                                _ => $"<span class='badge bg-danger' title='{s.Rcode}'>ERR</span>"
-                            };
-                            @Html.Raw(badge)
-                            ;
-                        }
+                            @Html.Raw(s.Rcode switch
+                                {
+                                    "NOERROR" => "<span class='badge bg-success' data-bs-toggle='tooltip' title='Ответ успешный'>OK</span>",
+                                    "NXDOMAIN" => "<span class='badge bg-warning text-dark' data-bs-toggle='tooltip' title='Домен не существует'>NX</span>",
+                                    _ => $"<span class='badge bg-danger' data-bs-toggle='tooltip' title='{s.Rcode}'>ERR</span>"
+                                })
                     </td>
-
+                    <td class="text-center">@s.Type</td>
                     <td class="text-center">
-                        @{
-                            var icon = s.Action switch
-                            {
-                                RuleAction.Allow => "check-lg text-success\" title=\"Allow",
-                                RuleAction.Block => "x-lg text-danger\"    title=\"Block",
-                                RuleAction.Rewrite => "arrow-repeat text-warning\" title=\"Rewrite",
-                                _ => ""
-                            };
-                            <i class="bi bi-@icon"></i>
-                            ;
-                        }
+                            @Html.Raw(s.Action switch
+                                {
+                                    RuleAction.Allow => "<i class='bi bi-check-circle text-success' data-bs-toggle='tooltip' title='Разрешено'></i>",
+                                    RuleAction.Block => "<i class='bi bi-x-circle text-danger' data-bs-toggle='tooltip' title='Заблокировано'></i>",
+                                    RuleAction.Rewrite => "<i class='bi bi-arrow-repeat text-warning' data-bs-toggle='tooltip' title='Перенаправлено'></i>",
+                                    _ => ""
+                                })
                     </td>
                 </tr>
-            }
+                }
         </tbody>
     </table>
 </div>
 
 @section Scripts {
     <script>
-        /* фильтрация лога */
         function filterLog(query) {
-            const mode  = document.getElementById('filterField').value;   // any | client | domain | upstream
+            const mode = document.getElementById('filterField').value;
             query = query.trim().toLowerCase();
 
             document.querySelectorAll('.log-table tbody tr').forEach(tr => {
@@ -93,10 +87,10 @@
                     mode === 'client'   ? tr.dataset.client.toLowerCase()   :
                     mode === 'domain'   ? tr.dataset.domain.toLowerCase()   :
                     mode === 'upstream' ? tr.dataset.upstream.toLowerCase() :
-                                          (tr.innerText || '').toLowerCase();   // any
-
+                                          (tr.innerText || '').toLowerCase();
                 tr.style.display = hay.includes(query) ? '' : 'none';
             });
         }
     </script>
+
 }

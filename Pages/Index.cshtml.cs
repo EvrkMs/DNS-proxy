@@ -8,8 +8,7 @@ public class IndexModel(AppDbContext db) : PageModel
     public List<VisitStatistic> Items { get; private set; } = [];
 
     public void OnGet() =>
-        Items = db.Stats
+        Items = [.. db.Stats
                   .OrderByDescending(s => s.Timestamp)
-                  .Take(200)
-                  .ToList();
+                  .Take(1000)];
 }

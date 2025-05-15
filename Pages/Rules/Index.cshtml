@@ -49,25 +49,31 @@
             @foreach (var r in Model.Items)
             {
                 string act = r.Action.ToString().ToLower(); // allow/block/rewrite
+                string tooltip = r.Action switch
+                {
+                    RuleAction.Allow => "Разрешить доступ",
+                    RuleAction.Block => "Заблокировать домен",
+                    RuleAction.Rewrite => "Перенаправить домен",
+                    _ => "Неизвестно"
+                };
+                string icon = r.Action switch
+                {
+                    RuleAction.Allow => "bi-check-circle text-success",
+                    RuleAction.Block => "bi-x-circle text-danger",
+                    RuleAction.Rewrite => "bi-arrow-repeat text-warning",
+                    _ => "bi-question-circle text-secondary"
+                };
+
                 <tr data-ip="@r.SourceIp"
                     data-domain="@r.DomainPattern.ToLower()"
                     data-action="@act">
 
                     <td>@r.SourceIp</td>
                     <td>@r.DomainPattern</td>
-                    <td class="text-center text-capitalize">
-                        @switch (r.Action)
-                        {
-                            case RuleAction.Allow:
-                                   <span class="text-success">allow</span>
-                                ; break;
-                            case RuleAction.Block:
-                                   <span class="text-danger">block</span>
-                                ; break;
-                            case RuleAction.Rewrite:
-                                <span class="text-warning">rewrite</span>
-                                ; break;
-                        }
+                    <td class="text-center">
+                        <i class="bi @icon"
+                           data-bs-toggle="tooltip"
+                           title="@tooltip"></i>
                     </td>
                     <td class="text-end">
                         <a class="btn btn-sm btn-primary me-1 edit-btn"

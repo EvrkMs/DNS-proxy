@@ -7,16 +7,42 @@ using ARSoft.Tools.Net.Dns;
 using DnsProxy.Models;
 using DnsProxy.Services;
 
-
 namespace DnsProxy.Utils;
 
-public class QueryMethot(ILogger<QueryMethot> _log, IHttpClientPerServerService httpPerServer)
+public class QueryMethot(
+    ILogger<QueryMethot> _log,
+    IHttpClientPerServerService httpPerServer,
+    ICacheService cache)
 {
     private static readonly Random _rnd = new();
-
+    private static DnsRecordBase? TryParseJsonRecord(RecordType rt, string data, DomainName name, int ttl)
+    {
+        return rt switch
+        {
+            RecordType.A when IPAddress.TryParse(data, out var ip4) => new ARecord(name, ttl, ip4),
+            RecordType.Aaaa when IPAddress.TryParse(data, out var ip6) => new AaaaRecord(name, ttl, ip6),
+            RecordType.Txt => new TxtRecord(name, ttl, data),
+            RecordType.Mx => TryParseMx(data, name, ttl),
+            RecordType.Ptr => new PtrRecord(name, ttl, DomainName.Parse(data)),
+            RecordType.CName => new CNameRecord(name, ttl, DomainName.Parse(data)),
+            RecordType.Ns => new NsRecord(name, ttl, DomainName.Parse(data)),
+            _ => null
+        };
+    }
+    
+    private static DnsRecordBase? TryParseMx(string data, DomainName name, int ttl)
+    {
+        var parts = data.Split(' ', 2);
+        if (parts.Length != 2 || !ushort.TryParse(parts[0], out var pref))
+            return null;
+        return new MxRecord(name, ttl, pref, DomainName.Parse(parts[1]));
+    }
     public async Task<(DnsRecordBase[] records, int ttl)> QueryUdpAsync(string domain, RecordType type, DnsServerEntry s)
     {
-        var resolver = new DnsStubResolver(new[] { IPAddress.Parse(s.Address!) }, 3000);
+        if (cache.TryGet(domain, type, out var cached))
+            return cached;
+
+        var resolver = new DnsStubResolver([IPAddress.Parse(s.Address!)], 3000);
         var records = await resolver.ResolveAsync<DnsRecordBase>(
             DomainName.Parse(domain), type, RecordClass.INet
         );
@@ -25,25 +51,25 @@ public class QueryMethot(ILogger<QueryMethot> _log, IHttpClientPerServerService 
             return (Array.Empty<DnsRecordBase>(), 0);
 
         var ttl = records.Min(r => r.TimeToLive);
+
+        cache.Set(domain, type, [.. records], ttl);
         return (records.ToArray(), ttl);
     }
 
     public async Task<(DnsRecordBase[] records, int ttl)> QueryDoHWireManualAsync(string domain, RecordType type, DnsServerEntry s)
     {
+        if (cache.TryGet(domain, type, out var cached))
+            return cached;
+
         var baseAddr = s.Address.TrimEnd('/');
         if (!baseAddr.Contains('/'))
             baseAddr += "/dns-query";
 
         byte[] wire = BuildWireQuery(domain, type);
-
-        string b64 = Convert.ToBase64String(wire)
-                             .TrimEnd('=')
-                             .Replace('+', '-')
-                             .Replace('/', '_');
-
+        string b64 = Convert.ToBase64String(wire).TrimEnd('=').Replace('+', '-').Replace('/', '_');
         var url = $"{baseAddr}?dns={b64}";
-        var http = httpPerServer.GetOrCreate(s);
 
+        var http = httpPerServer.GetOrCreate(s);
         var req = new HttpRequestMessage(HttpMethod.Get, url)
         {
             Version = HttpVersion.Version20,
@@ -66,11 +92,17 @@ public class QueryMethot(ILogger<QueryMethot> _log, IHttpClientPerServerService 
         var relevant = msg.AnswerRecords.Where(r => r.RecordType == type).ToArray();
         var ttl = relevant.Length > 0 ? relevant.Min(r => (int)r.TimeToLive) : 0;
 
+        if (ttl > 0 && relevant.Length > 0)
+            cache.Set(domain, type, relevant, ttl);
+
         return (relevant, ttl);
     }
 
     public async Task<(DnsRecordBase[] records, int ttl)> QueryDoHJsonAsync(string domain, RecordType type, DnsServerEntry s)
     {
+        if (cache.TryGet(domain, type, out var cached))
+            return cached;
+
         var baseAddr = s.Address.TrimEnd('/');
         if (!baseAddr.Contains('/'))
             baseAddr += "/resolve";
@@ -94,7 +126,7 @@ public class QueryMethot(ILogger<QueryMethot> _log, IHttpClientPerServerService 
         }
 
         using var doc = await JsonSerializer.DeserializeAsync<JsonDocument>(
-                            await resp.Content.ReadAsStreamAsync());
+            await resp.Content.ReadAsStreamAsync());
         if (doc == null || !doc.RootElement.TryGetProperty("Answer", out var answers))
             return ([], 0);
 
@@ -111,20 +143,13 @@ public class QueryMethot(ILogger<QueryMethot> _log, IHttpClientPerServerService 
             ttl = Math.Min(ttl, ttlVal);
 
             var data = el.GetProperty("data").GetString();
-            if (rt == RecordType.A && IPAddress.TryParse(data, out var ip4))
-                records.Add(new ARecord(name, ttlVal, ip4));
-            else if (rt == RecordType.Aaaa && IPAddress.TryParse(data, out var ip6))
-                records.Add(new AaaaRecord(name, ttlVal, ip6));
-            else if (rt == RecordType.Txt)
-                records.Add(new TxtRecord(name, ttlVal, data!));
-            else if (rt == RecordType.Mx)
-            {
-                var parts = data!.Split(' ', 2);
-                if (parts.Length == 2 && ushort.TryParse(parts[0], out var pref))
-                    records.Add(new MxRecord(name, ttlVal, pref, DomainName.Parse(parts[1])));
-            }
-            // Можно дополнить: NS, PTR, CNAME, SOA и др.
+            var parsed = TryParseJsonRecord(rt, data!, name, ttlVal);
+            if (parsed != null)
+                records.Add(parsed);
         }
+
+        if (records.Count > 0 && ttl != int.MaxValue)
+            cache.Set(domain, type, records.ToArray(), ttl);
 
         return (records.ToArray(), ttl == int.MaxValue ? 0 : ttl);
     }
@@ -135,11 +160,8 @@ public class QueryMethot(ILogger<QueryMethot> _log, IHttpClientPerServerService 
         var header = new byte[]
         {
             (byte)(id >> 8), (byte)id,
-            0x01, 0x00,   // RD=1
-            0x00, 0x01,   // QDCOUNT=1
-            0x00, 0x00,
-            0x00, 0x00,
-            0x00, 0x00
+            0x01, 0x00, 0x00, 0x01,  // QDCOUNT=1
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00
         };
 
         var q = new List<byte>();
@@ -149,7 +171,7 @@ public class QueryMethot(ILogger<QueryMethot> _log, IHttpClientPerServerService 
             q.Add((byte)bs.Length);
             q.AddRange(bs);
         }
-        q.Add(0x00); // терминатор QNAME
+        q.Add(0x00); // конец имени
         q.AddRange(BitConverter.GetBytes((ushort)IPAddress.HostToNetworkOrder((short)type))); // QTYPE
         q.Add(0x00); q.Add(0x01); // QCLASS = IN
 

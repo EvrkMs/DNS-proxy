@@ -27,12 +27,10 @@ public sealed class DnsProxyServer : IDisposable
     private readonly DnsServer _server;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<DnsProxyServer> _log;
-    private readonly ICacheService cache;
 
     /*-------------------------------------------------------------------------*/
     public DnsProxyServer(IServiceScopeFactory scopeFactory,
-                          ILogger<DnsProxyServer> log,
-                          ICacheService cache)
+                          ILogger<DnsProxyServer> log)
     {
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _log = log ?? throw new ArgumentNullException(nameof(log));
@@ -41,7 +39,6 @@ public sealed class DnsProxyServer : IDisposable
         _server = new DnsServer(bindEndPoint: bind, udpListenerCount: 1, tcpListenerCount: 0);
 
         _server.QueryReceived += OnQueryAsync;
-        this.cache = cache;
     }
 
     public void Start() { _server.Start(); StartForceCacheUpdater(); }
@@ -101,20 +98,11 @@ public sealed class DnsProxyServer : IDisposable
 
         if (act == RuleAction.Rewrite && IPAddress.TryParse(rewrite, out var ipRw))
         {
-            var rec = new ARecord(DomainName.Parse(domain), 60, ipRw);
-            return DnsResolveResult.Success([rec], 60, "REWRITE");
+            var rec = new ARecord(DomainName.Parse(domain), 120, ipRw);
+            return DnsResolveResult.Success([rec], 120, "REWRITE", type);
         }
 
         var pool = await cfg.FilterServers(includeCsv, excludeCsv, forceId);
-
-        if (cache.TryGet(domain, type, out var cached))
-            return new DnsResolveResult
-            {
-                Records = cached.records,
-                Ttl = cached.ttl,
-                Upstream = "CACHE",
-                RCode = "NOERROR"
-            };
 
         DnsResolveResult result;
 
@@ -134,9 +122,6 @@ public sealed class DnsProxyServer : IDisposable
             result = await resolver.ResolveAsync(domain, type, pool);
         }
 
-        if (result.Records.Length > 0)
-            cache.Set(domain, type, result.Records, result.Ttl);
-
         await stats.AddAsync(new VisitStatistic
         {
             Timestamp = DateTime.UtcNow,
@@ -144,7 +129,8 @@ public sealed class DnsProxyServer : IDisposable
             Domain = domain,
             Upstream = result.Upstream,
             Rcode = result.RCode,
-            Action = act
+            Action = act,
+            Type = result.Type
         });
 
         return result;
@@ -161,7 +147,6 @@ public sealed class DnsProxyServer : IDisposable
                 var rulesSvc = scope.ServiceProvider.GetRequiredService<IRuleService>();
                 var resolver = scope.ServiceProvider.GetRequiredService<IResolverService>();
                 var conf = scope.ServiceProvider.GetRequiredService<IDnsConfigService>();
-                var cache = scope.ServiceProvider.GetRequiredService<ICacheService>();
 
                 var rules = await rulesSvc.GetAllAsync();
                 var forceRules = rules.Where(r => r.ForceServerId is not null).ToList();
@@ -185,16 +170,9 @@ public sealed class DnsProxyServer : IDisposable
                         // ⛳ по умолчанию кэшируем только A-записи
                         var type = RecordType.A;
 
-                        if (cache.TryGet(dom, type, out var cached) && cached.ttl > 0)
-                        {
-                            if (minTtl is null || cached.ttl < minTtl)
-                                minTtl = cached.ttl;
-                            continue;
-                        }
                         var result = await resolver.ResolveAsync(dom, type, pool);
                         if (result.Records.Length > 0 && result.RCode == "NOERROR")
                         {
-                            cache.Set(dom, type, result.Records, result.Ttl);
                             _log.LogInformation("Force cache updated: {domain} → {ip} (TTL: {ttl})",
                                 dom, string.Join(", ", result.Records.Select(r => r.ToString())), result.Ttl);
 

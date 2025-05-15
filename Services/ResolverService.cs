@@ -54,7 +54,7 @@ public class ResolverService(
                 var (records, ttl) = await ResolveOne(domain, type, server);
 
                 if (records.Length > 0)
-                    return DnsResolveResult.Success(records, ttl, server.Address!);
+                    return DnsResolveResult.Success(records, ttl, server.Address!, type);
 
                 _log.LogWarning("[{addr}] returned NXDOMAIN for {domain}", server.Address, domain);
             }
@@ -79,7 +79,7 @@ public class ResolverService(
             {
                 var (records, ttl) = await ResolveOne(domain, type, server);
                 return records.Length > 0
-                    ? DnsResolveResult.Success(records, ttl, server.Address!)
+                    ? DnsResolveResult.Success(records, ttl, server.Address!, type)
                     : DnsResolveResult.Empty(server.Address!, "NXDOMAIN");
             }
             catch (Exception ex)
@@ -119,9 +119,10 @@ public class DnsResolveResult
     public int Ttl { get; set; }
     public string Upstream { get; set; } = "-";
     public string RCode { get; set; } = "NXDOMAIN";
-    public static DnsResolveResult Empty(string upstream = "-", string rcode = "NXDOMAIN")
-    => new() { Upstream = upstream, RCode = rcode };
+    public RecordType Type { get; set; } = RecordType.Invalid;
+    public static DnsResolveResult Empty(string upstream = "-", string rcode = "NXDOMAIN", RecordType Type = RecordType.Invalid)
+    => new () { Upstream = upstream, RCode = rcode };
 
-    public static DnsResolveResult Success(DnsRecordBase[] records, int ttl, string upstream)
-        => new() { Records = records, Ttl = ttl, Upstream = upstream, RCode = "NOERROR" };
+    public static DnsResolveResult Success(DnsRecordBase[] records, int ttl, string upstream, RecordType Type)
+        => new() { Records = records, Ttl = ttl, Upstream = upstream, RCode = "NOERROR", Type = Type };
 }

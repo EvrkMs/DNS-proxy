@@ -42,7 +42,7 @@ builder.Services.AddScoped<IConfigService, ConfigService>();
 builder.Services.AddScoped<QueryMethot>();
 
 builder.Services.AddSingleton<IHttpClientPerServerService, HttpClientPerServerService>();
-builder.Services.AddSingleton<ICacheService, MemoryCacheService>();
+builder.Services.AddSingleton<ICacheService, SimpleDnsCacheService>();
 builder.Services.AddSingleton<DnsProxyServer>();
 builder.Services.AddHostedService<DnsBackground>();
 
@@ -80,6 +80,15 @@ app.MapPost("/admin/flush", (ICacheService c) =>
 {
     c.Clear();
     Log.Logger.Information("Cache flushed");
+    return Results.NoContent();
+});
+
+app.MapPost("/admin/flushstat", async (IServiceProvider services) =>
+{
+    using var scope = services.CreateScope();
+    var stat = scope.ServiceProvider.GetRequiredService<IStatisticsService>();
+    await stat.ClearStats();
+    
     return Results.NoContent();
 });
 
